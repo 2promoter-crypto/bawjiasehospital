@@ -29,9 +29,14 @@ create table if not exists app_users (
   username text unique not null,
   role text,
   is_admin boolean not null default false,
+  approved boolean not null default true,
   pass_hash text not null,
   created_at text
 );
+
+-- If you already ran an earlier version of this schema, this adds the new
+-- column without touching your existing accounts (they stay approved).
+alter table app_users add column if not exists approved boolean not null default true;
 
 create table if not exists app_settings (
   key text primary key,
