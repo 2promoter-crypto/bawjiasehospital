@@ -1,0 +1,2399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bawjiase Primary Hospital — Inventory Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --ink:#0e2417;
+    --ink-2:#163a24;
+    --ink-3:#1f4c2f;
+    --paper:#fbe9c6;
+    --paper-2:#f4d99a;
+    --paper-line:#d9b968;
+    --paper-ink:#1c2a1c;
+    --cream:#f5f1e6;
+    --amber:#f2a900;
+    --amber-dark:#c48a00;
+    --teal:#1fa24a;
+    --teal-dark:#157a37;
+    --rust:#e31b23;
+    --rust-dark:#b4141a;
+    --muted:#86a893;
+    --shadow: 0 8px 24px rgba(0,0,0,0.35);
+    --radius: 3px;
+  }
+  html.light{
+    --ink:#f7f8f2;
+    --ink-2:#eaf1e3;
+    --ink-3:#d3e2c9;
+    --paper:#163a24;
+    --paper-2:#102d1c;
+    --paper-line:#2c5a3c;
+    --paper-ink:#f5f1e6;
+    --cream:#16301f;
+    --muted:#6c8577;
+    --shadow: 0 8px 20px rgba(0,0,0,0.12);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--ink);
+    color:var(--cream);
+    font-family:'IBM Plex Sans', sans-serif;
+    min-height:100vh;
+    transition:background .25s ease, color .25s ease;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important;}
+  }
+  h1,h2,h3,.display{
+    font-family:'Oswald', sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    font-weight:600;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace;}
+
+  /* ---------- top bar ---------- */
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 28px;
+    border-bottom:2px solid var(--ink-3);
+    background:var(--ink-2);
+    position:sticky; top:0; z-index:20;
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand .mark{
+    width:38px;height:38px;border-radius:50%;
+    background:var(--rust);
+    display:flex;align-items:center;justify-content:center;
+    color:#fff; font-family:'Oswald',sans-serif; font-weight:700; font-size:18px;
+    box-shadow: inset 0 0 0 3px rgba(0,0,0,.15);
+  }
+  .brand h1{font-size:20px;margin:0;color:var(--cream); letter-spacing:.08em;}
+  .brand small{display:block; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--muted); text-transform:none; letter-spacing:.02em;}
+
+  nav{display:flex; gap:4px; flex-wrap:wrap;}
+  nav button{
+    background:transparent; border:none; color:var(--muted);
+    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.06em;
+    font-size:13px; padding:9px 14px; border-radius:var(--radius); cursor:pointer;
+  }
+  nav button:hover{color:var(--cream);}
+  nav button.active{background:var(--amber); color:var(--ink); font-weight:600;}
+
+  .theme-toggle{
+    border:1px solid var(--ink-3); background:none; color:var(--muted);
+    width:36px;height:36px;border-radius:50%; cursor:pointer; font-size:16px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .theme-toggle:hover{color:var(--amber); border-color:var(--amber);}
+
+  main{max-width:1180px; margin:0 auto; padding:28px 20px 80px;}
+  .view{display:none;}
+  .view.active{display:block; animation:fade .3s ease;}
+  @keyframes fade{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+
+  section.panel{
+    background:var(--ink-2);
+    border:1px solid var(--ink-3);
+    border-radius:6px;
+    padding:22px;
+    margin-bottom:22px;
+  }
+  .panel h2{font-size:16px; color:var(--amber); margin:0 0 16px;}
+  .panel h2 .count{color:var(--muted); font-family:'IBM Plex Mono',monospace; font-weight:400; text-transform:none; letter-spacing:0; font-size:13px; margin-left:8px;}
+
+  /* ---------- stat stamps ---------- */
+  .stamps{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(170px,1fr));
+    gap:14px;
+    margin-bottom:22px;
+  }
+  .stamp{
+    background:var(--paper); color:var(--paper-ink);
+    border-radius:var(--radius);
+    padding:16px 16px 14px;
+    position:relative;
+    box-shadow:var(--shadow);
+    border:1px solid var(--paper-line);
+  }
+  .stamp::before{
+    content:attr(data-tag);
+    position:absolute; top:-9px; left:12px;
+    background:var(--ink); color:var(--amber);
+    font-family:'IBM Plex Mono',monospace; font-size:9px; letter-spacing:.08em;
+    padding:2px 7px; border-radius:2px; text-transform:uppercase;
+  }
+  .stamp .label{font-family:'Oswald',sans-serif; font-size:12px; text-transform:uppercase; letter-spacing:.06em; opacity:.65; margin-top:4px;}
+  .stamp .value{font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600; margin-top:2px; cursor:pointer; user-select:none;}
+  .stamp.pos .value{color:var(--teal-dark);}
+  .stamp.neg .value{color:var(--rust-dark);}
+  .stamp .value.masked{filter:blur(7px); opacity:.6;}
+  .stamp .peek-hint{font-family:'Oswald',sans-serif; font-size:9px; text-transform:uppercase; letter-spacing:.05em; opacity:.6; margin-top:4px; cursor:pointer; display:none;}
+  .stamp .peek-hint.show{display:block;}
+
+  .filter-row{display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:18px;}
+  .field{display:flex; flex-direction:column; gap:5px;}
+  .field label{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-family:'Oswald',sans-serif;}
+  input, select{
+    background:var(--ink-3); color:var(--cream); border:1px solid var(--ink-3);
+    border-radius:var(--radius); padding:8px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible{
+    outline:2px solid var(--amber); outline-offset:2px;
+  }
+  .btn{
+    background:var(--amber); color:var(--ink); border:none; font-family:'Oswald',sans-serif;
+    text-transform:uppercase; letter-spacing:.05em; font-weight:600; font-size:13px;
+    padding:9px 16px; border-radius:var(--radius); cursor:pointer;
+  }
+  .btn:hover{background:var(--amber-dark);}
+  .btn.ghost{background:none; border:1px solid var(--muted); color:var(--muted);}
+  .btn.ghost:hover{border-color:var(--cream); color:var(--cream);}
+  .btn.small{padding:5px 10px; font-size:11px;}
+  .btn.danger{background:var(--rust);}
+  .btn.danger:hover{background:var(--rust-dark);}
+
+  /* ---------- ledger table ---------- */
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  thead th{
+    text-align:left; font-family:'Oswald',sans-serif; text-transform:uppercase;
+    letter-spacing:.05em; font-size:11px; color:var(--muted); padding:8px 10px;
+    border-bottom:2px solid var(--ink-3);
+  }
+  tbody td{padding:9px 10px; border-bottom:1px dashed var(--ink-3); font-family:'IBM Plex Mono',monospace; font-size:13px;}
+  tbody td.name{font-family:'IBM Plex Sans',sans-serif; min-width:200px; white-space:normal;}
+  tbody tr:hover{background:rgba(255,255,255,.03);}
+  .tag{
+    display:inline-block; padding:2px 9px; border-radius:20px; font-size:10px;
+    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.06em; font-weight:600;
+    transform:rotate(-2deg);
+  }
+  .tag.in{background:rgba(76,143,132,.18); color:var(--teal); border:1px solid var(--teal);}
+  .tag.out{background:rgba(165,73,58,.18); color:var(--rust); border:1px solid var(--rust);}
+  .row-actions{display:flex; gap:6px;}
+  .table-wrap{overflow-x:auto;}
+
+  .empty{
+    text-align:center; padding:40px 20px; color:var(--muted);
+    border:1px dashed var(--ink-3); border-radius:6px;
+  }
+  .empty .display{font-size:15px; color:var(--cream); margin-bottom:6px;}
+
+  /* ---------- forms ---------- */
+  form.entry{
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr));
+    gap:12px; align-items:end;
+  }
+  form.entry .full{grid-column:1/-1;}
+  .form-footer{display:flex; gap:10px; margin-top:14px;}
+  .helper{font-size:11px; color:var(--muted); margin-top:4px;}
+  .type-toggle{display:flex; border:1px solid var(--ink-3); border-radius:var(--radius); overflow:hidden;}
+  .type-toggle button{
+    flex:1; background:var(--ink-3); color:var(--muted); border:none; padding:8px 10px;
+    font-family:'Oswald',sans-serif; letter-spacing:.05em; text-transform:uppercase; font-size:12px; cursor:pointer;
+  }
+  .type-toggle button.sel.in{background:var(--teal); color:#0f1b18;}
+  .type-toggle button.sel.out{background:var(--rust); color:#1f0e0a;}
+
+  /* ---------- bin cards ---------- */
+  .bin-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:10px;
+  }
+  .bin-card{
+    background:var(--paper); color:var(--paper-ink); border-radius:2px;
+    box-shadow:var(--shadow); position:relative; padding:12px 14px 10px;
+    border:1px solid var(--paper-line);
+  }
+  .bin-card::before{
+    content:""; position:absolute; top:-1px; left:14px; width:44px; height:11px;
+    background:var(--paper-2); border:1px solid var(--paper-line); border-top:none;
+    border-radius:0 0 5px 5px;
+  }
+  .bin-card .item-name{font-family:'Oswald',sans-serif; font-size:13px; text-transform:uppercase; letter-spacing:.03em; margin-top:5px;}
+  .bin-card .balance{font-family:'IBM Plex Mono',monospace; font-size:22px; font-weight:600; margin:3px 0 1px;}
+  .bin-card .balance.neg{color:var(--rust-dark);}
+  .bin-card .sub-label{font-size:9px; text-transform:uppercase; letter-spacing:.08em; opacity:.6; font-family:'Oswald',sans-serif;}
+  .bin-card .split{display:flex; flex-direction:column; gap:4px; margin-top:8px; padding-top:7px; border-top:1px dashed var(--paper-line); font-family:'IBM Plex Mono',monospace; font-size:11px;}
+  .bin-card .split div{display:flex; justify-content:space-between;}
+  .bin-card .split div span{display:inline; font-size:9px; opacity:.6; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.06em;}
+  .bin-card .value-line{margin-top:6px; font-size:11px; font-family:'IBM Plex Mono',monospace; opacity:.85;}
+  .bin-card .prices-line{display:flex; flex-direction:column; gap:4px; margin-top:7px; padding-top:7px; border-top:1px dashed var(--paper-line); font-size:10px;}
+  .bin-card .prices-line div{display:flex; justify-content:space-between;}
+  .bin-card .prices-line div span{display:inline; font-size:9px; opacity:.6; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.06em;}
+  .bin-card .prices-line div strong{font-family:'IBM Plex Mono',monospace; font-weight:600;}
+  .bin-card .last-activity{
+    margin-top:8px; padding-top:7px; border-top:1px dashed var(--paper-line);
+    font-size:10px; line-height:1.4;
+  }
+  .bin-card .last-activity .sub-label{margin-bottom:2px;}
+  .bin-card .tx-count{font-size:9px; opacity:.55; margin-top:1px;}
+  .bin-card details.recent{margin-top:6px;}
+  .bin-card details.recent summary{
+    cursor:pointer; font-size:9px; text-transform:uppercase; letter-spacing:.06em;
+    font-family:'Oswald',sans-serif; opacity:.75; list-style:none;
+  }
+  .bin-card details.recent summary::-webkit-details-marker{display:none;}
+  .bin-card details.recent summary::before{content:'▸ '; }
+  .bin-card details.recent[open] summary::before{content:'▾ '; }
+  .bin-card .recent-row{
+    display:flex; justify-content:space-between; gap:6px; font-size:10px;
+    font-family:'IBM Plex Mono',monospace; padding:3px 0; border-bottom:1px dotted var(--paper-line);
+  }
+  .bin-card .recent-row:last-child{border-bottom:none;}
+  .bin-card .recent-row .rtype.in{color:var(--teal-dark);}
+  .bin-card .recent-row .rtype.out{color:var(--rust-dark);}
+  .stock-toolbar{display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:18px;}
+  .stock-toolbar .field{min-width:180px;}
+  .stock-summary{font-size:11px; color:var(--muted); margin-bottom:14px;}
+
+
+  /* ---------- app lock screen ---------- */
+  #appLockScreen{
+    position:fixed; inset:0; background:var(--ink); z-index:300;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .lock-box{
+    background:var(--ink-2); border:1px solid var(--ink-3); border-radius:6px;
+    padding:34px 30px; width:100%; max-width:360px; box-shadow:var(--shadow); text-align:center;
+  }
+  .lock-box .mark{
+    width:56px;height:56px;border-radius:50%; background:var(--rust); margin:0 auto 16px;
+    display:flex; align-items:center; justify-content:center; color:#fff;
+    font-family:'Oswald',sans-serif; font-weight:700; font-size:26px;
+  }
+  .lock-box h2{margin:0 0 6px; font-size:17px; color:var(--cream); text-transform:uppercase; letter-spacing:.04em; font-family:'Oswald',sans-serif;}
+  .lock-box p{font-size:12px; color:var(--muted); margin:0 0 20px;}
+  .lock-box .field{text-align:left; margin-bottom:4px;}
+  .lock-box input{width:100%;}
+  .lock-box .btn{width:100%; margin-top:14px;}
+  .lock-box .modal-error{text-align:left;}
+
+  /* ---------- auth (accounts) screen ---------- */
+  #authScreen{
+    position:fixed; inset:0; background:var(--ink); z-index:400;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .auth-box{
+    background:var(--ink-2); border:1px solid var(--ink-3); border-radius:6px;
+    padding:34px 30px; width:100%; max-width:380px; box-shadow:var(--shadow);
+  }
+  .auth-box .mark{
+    width:56px;height:56px;border-radius:50%; background:var(--rust); margin:0 auto 16px;
+    display:flex; align-items:center; justify-content:center; color:#fff;
+    font-family:'Oswald',sans-serif; font-weight:700; font-size:26px;
+  }
+  .auth-box h2{margin:0 0 6px; font-size:17px; color:var(--cream); text-transform:uppercase; letter-spacing:.04em; font-family:'Oswald',sans-serif; text-align:center;}
+  .auth-box p.sub{font-size:12px; color:var(--muted); margin:0 0 20px; text-align:center;}
+  .auth-tabs{display:flex; gap:4px; margin-bottom:20px; background:var(--ink); border-radius:var(--radius); padding:4px;}
+  .auth-tabs button{
+    flex:1; background:transparent; border:none; color:var(--muted); cursor:pointer;
+    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.05em;
+    font-size:12px; padding:8px 6px; border-radius:2px;
+  }
+  .auth-tabs button.active{background:var(--amber); color:var(--ink); font-weight:600;}
+  .auth-box .field{text-align:left; margin-bottom:12px;}
+  .auth-box input{width:100%;}
+  .auth-box .btn{width:100%; margin-top:4px;}
+  .auth-box .modal-error{text-align:left;}
+  .auth-box .helper{margin:0 0 14px; text-align:left;}
+
+  /* ---------- header user badge ---------- */
+  .user-badge{
+    display:flex; align-items:center; gap:8px; padding:5px 10px 5px 5px;
+    background:var(--ink-3); border-radius:20px; margin-right:6px;
+  }
+  .user-badge .avatar{
+    width:24px; height:24px; border-radius:50%; background:var(--teal);
+    color:var(--cream); display:flex; align-items:center; justify-content:center;
+    font-family:'Oswald',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;
+  }
+  .user-badge .user-name{font-size:12px; color:var(--cream); font-family:'IBM Plex Sans',sans-serif; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .user-badge button{
+    background:none; border:none; color:var(--muted); cursor:pointer; font-size:11px;
+    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.04em; padding:0 2px;
+  }
+  .user-badge button:hover{color:var(--rust);}
+
+  /* ---------- accounts list (security view) ---------- */
+  .account-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 0; border-bottom:1px solid var(--ink-3);
+  }
+  .account-row:last-child{border-bottom:none;}
+  .account-row .name{font-size:13px; color:var(--cream); font-weight:500;}
+
+  /* ---------- password modal ---------- */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(10,12,16,.72);
+    z-index:100; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-overlay.active{display:flex;}
+  .modal-box{
+    background:var(--ink-2); border:1px solid var(--ink-3); border-radius:6px;
+    padding:26px; width:100%; max-width:340px; box-shadow:var(--shadow);
+  }
+  .modal-box h3{margin:0 0 6px; font-size:16px; color:var(--amber);}
+  .modal-box p{font-size:12px; color:var(--muted); margin:0 0 16px;}
+  .modal-box .field{margin-bottom:6px;}
+  .modal-box input{width:100%;}
+  .modal-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:16px;}
+  .modal-error{font-size:12px; color:var(--rust); min-height:16px; margin-top:8px;}
+
+  footer.hint{text-align:center; color:var(--muted); font-size:11px; margin-top:30px;}
+
+  @media (max-width:640px){
+    header{padding:14px 16px;}
+    nav button{padding:8px 10px; font-size:11px;}
+    main{padding:20px 12px 60px;}
+  }
+</style>
+</head>
+<body>
+
+<div id="authScreen">
+  <div class="auth-box">
+    <div class="mark">H</div>
+    <h2>Bawjiase Primary Hospital</h2>
+    <p class="sub">Sign in or create an account to use the inventory ledger.</p>
+    <div class="auth-tabs">
+      <button type="button" id="authTabLogin" class="active">Log in</button>
+      <button type="button" id="authTabRegister">Create account</button>
+    </div>
+
+    <form id="loginForm">
+      <div class="field">
+        <label for="loginUsername">Username</label>
+        <input type="text" id="loginUsername" autocomplete="username" placeholder="e.g. j.mensah" required>
+      </div>
+      <div class="field">
+        <label for="loginPassword">Password</label>
+        <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Password" required>
+      </div>
+      <div class="modal-error" id="loginError"></div>
+      <button type="submit" class="btn">Log in</button>
+    </form>
+
+    <form id="registerForm" style="display:none;">
+      <div class="field">
+        <label for="regName">Your name</label>
+        <input type="text" id="regName" autocomplete="name" placeholder="e.g. Josephine Mensah" required>
+      </div>
+      <div class="field">
+        <label for="regUsername">Choose a username</label>
+        <input type="text" id="regUsername" autocomplete="username" placeholder="e.g. j.mensah" required>
+      </div>
+      <div class="field">
+        <label for="regRole">Role</label>
+        <select id="regRole">
+          <option>Warehouse Manager</option>
+          <option>Store Officer</option>
+          <option>Pharmacist</option>
+          <option>Nurse</option>
+          <option>Dr.(Medical)</option>
+          <option>Dr.(Dentist)</option>
+          <option selected>Procurement Manager</option>
+          <option>Supply Officer</option>
+          <option>Administrator</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="regPassword">Choose a password</label>
+        <input type="password" id="regPassword" autocomplete="new-password" placeholder="At least 4 characters" required>
+      </div>
+      <div class="field">
+        <label for="regConfirm">Confirm password</label>
+        <input type="password" id="regConfirm" autocomplete="new-password" placeholder="Repeat password" required>
+      </div>
+      <div class="modal-error" id="registerError"></div>
+      <button type="submit" class="btn">Create account</button>
+    </form>
+  </div>
+</div>
+
+<div id="appLockScreen">
+  <div class="lock-box">
+    <div class="mark">H</div>
+    <h2>Bawjiase Primary Hospital</h2>
+    <p>Enter the app password to continue.</p>
+    <div class="field">
+      <input type="password" id="appLockInput" autocomplete="off" placeholder="Password" aria-label="Password">
+    </div>
+    <div class="modal-error" id="appLockError"></div>
+    <button type="button" class="btn" id="appLockSubmit">Unlock</button>
+  </div>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="mark">H</div>
+    <div>
+      <h1>Bawjiase Primary Hospital</h1>
+      <small>inventory ledger &amp; stock control</small>
+    </div>
+  </div>
+  <nav>
+    <button data-view="dashboard" class="active">Dashboard</button>
+    <button data-view="transactions">Transactions</button>
+    <button data-view="stock">Stock</button>
+    <button data-view="items">Items</button>
+    <button data-view="search">Search</button>
+    <button data-view="export">Export</button>
+    <button data-view="security">Password</button>
+  </nav>
+  <div class="user-badge" id="currentUserBadge" style="display:none;">
+    <div class="avatar" id="currentUserAvatar"></div>
+    <span class="user-name" id="currentUserName"></span>
+    <button type="button" id="logoutBtn" title="Log out">Log out</button>
+  </div>
+  <button class="theme-toggle" id="themeToggle" title="Toggle light/dark" aria-label="Toggle theme">☾</button>
+</header>
+
+<main>
+
+  <!-- DASHBOARD -->
+  <div class="view active" id="view-dashboard">
+    <section class="panel">
+      <h2>Ledger period</h2>
+      <div class="filter-row">
+        <div class="field">
+          <label for="fromDate">From date</label>
+          <input type="date" id="fromDate">
+        </div>
+        <div class="field">
+          <label for="toDate">To date</label>
+          <input type="date" id="toDate">
+        </div>
+        <button class="btn ghost small" id="resetDates">Reset to this month</button>
+      </div>
+
+      <div class="stamps">
+        <div class="stamp" data-tag="in range"><div class="label">Purchases (₵)</div><div class="value mono masked" id="statPurchase">0</div><div class="peek-hint show">Tap to view</div></div>
+        <div class="stamp" data-tag="in range"><div class="label">Sales (₵)</div><div class="value mono masked" id="statSales">0</div><div class="peek-hint show">Tap to view</div></div>
+        <div class="stamp" data-tag="in range" id="statGPWrap"><div class="label">Gross profit (₵)</div><div class="value mono masked" id="statGP">0</div><div class="peek-hint show">Tap to view</div></div>
+        <div class="stamp" data-tag="right now"><div class="label">Stock units</div><div class="value mono masked" id="statUnits">0</div><div class="peek-hint show">Tap to view</div></div>
+        <div class="stamp" data-tag="right now"><div class="label">Stock value (₵)</div><div class="value mono masked" id="statValue">0</div><div class="peek-hint show">Tap to view</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Reorder alerts <span class="count" id="reorderCount"></span></h2>
+      <div class="table-wrap" id="reorderAlertWrap"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Recent activity <span class="count" id="recentCount"></span></h2>
+      <div class="table-wrap" id="recentTableWrap"></div>
+    </section>
+  </div>
+
+  <!-- TRANSACTIONS -->
+  <div class="view" id="view-transactions">
+    <section class="panel">
+      <h2 id="txFormTitle">Log a stock movement</h2>
+      <form class="entry" id="txForm">
+        <input type="hidden" id="txEditId">
+        <div class="field full">
+          <label>Movement type</label>
+          <div class="type-toggle">
+            <button type="button" class="sel in" data-type="Stock In">Stock In (purchase)</button>
+            <button type="button" data-type="Stock Out">Stock Out (sale)</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="txDate">Date</label>
+          <input type="date" id="txDate" required>
+        </div>
+        <div class="field full">
+          <label for="txItem">Item</label>
+          <select id="txItem" required></select>
+        </div>
+        <div class="field">
+          <label for="txQty">Quantity</label>
+          <input type="number" id="txQty" min="0.0001" step="any" required>
+        </div>
+        <div class="field">
+          <label for="txPrice">Price / unit (₵)</label>
+          <input type="number" id="txPrice" min="0" step="any" required>
+        </div>
+        <div class="field">
+          <label>Amount (₵)</label>
+          <input type="text" id="txAmount" disabled class="mono">
+        </div>
+        <div class="field full">
+          <label for="txParty" id="txPartyLabel">Supplier</label>
+          <input type="text" id="txParty" list="txPartyList" placeholder="e.g. Kinapharma Ltd.">
+          <datalist id="txPartyList"></datalist>
+        </div>
+        <div class="form-footer full">
+          <button type="submit" class="btn" id="txSubmitBtn">Add transaction</button>
+          <button type="button" class="btn ghost" id="txCancelEdit" style="display:none;">Cancel edit</button>
+        </div>
+      </form>
+      <div class="helper" id="txHelper"></div>
+    </section>
+
+    <section class="panel">
+      <h2>All transactions <span class="count" id="txCount"></span></h2>
+      <div class="table-wrap" id="txTableWrap"></div>
+    </section>
+  </div>
+
+  <!-- STOCK -->
+  <div class="view" id="view-stock">
+    <section class="panel">
+      <h2>Bin cards — live balance per item</h2>
+      <div class="stock-toolbar">
+        <div class="field">
+          <label for="stockSearch">Search item</label>
+          <input type="text" id="stockSearch" placeholder="Type an item name…">
+        </div>
+        <div class="field">
+          <label for="stockSort">Sort by</label>
+          <select id="stockSort">
+            <option value="name">Name (A–Z)</option>
+            <option value="balance-asc">Balance (low to high)</option>
+            <option value="balance-desc">Balance (high to low)</option>
+            <option value="value-desc">Stock value (high to low)</option>
+            <option value="recent">Most recently active</option>
+          </select>
+        </div>
+        <div class="field" style="min-width:auto;">
+          <label style="display:flex; align-items:center; gap:8px; flex-direction:row; text-transform:none; letter-spacing:0; font-family:'IBM Plex Sans',sans-serif; font-size:12px; color:var(--muted); font-weight:400;">
+            <input type="checkbox" id="stockLowOnly" style="width:auto;"> Low stock &amp; below reorder only
+          </label>
+        </div>
+      </div>
+      <div class="stock-summary" id="stockSummary"></div>
+      <div class="bin-grid" id="binGrid"></div>
+    </section>
+  </div>
+
+  <!-- ITEMS -->
+  <div class="view" id="view-items">
+    <section class="panel">
+      <h2 id="itemFormTitle">Add an item</h2>
+      <form class="entry" id="itemForm">
+        <input type="hidden" id="itemEditId">
+        <div class="field full">
+          <label for="itemName">Item name</label>
+          <input type="text" id="itemName" required>
+        </div>
+        <div class="field">
+          <label for="itemPPPU">Purchase price / unit (₵)</label>
+          <input type="number" id="itemPPPU" min="0" step="any" required>
+        </div>
+        <div class="field">
+          <label for="itemSPPU">Sale price / unit (₵)</label>
+          <input type="number" id="itemSPPU" min="0" step="any" required>
+        </div>
+        <div class="field">
+          <label for="itemExpiry">Expiry date</label>
+          <input type="date" id="itemExpiry">
+        </div>
+        <div class="field">
+          <label for="itemReorder">Reorder level</label>
+          <input type="number" id="itemReorder" min="0" step="any" placeholder="e.g. 20">
+        </div>
+        <div class="form-footer full">
+          <button type="submit" class="btn" id="itemSubmitBtn">Add item</button>
+          <button type="button" class="btn ghost" id="itemCancelEdit" style="display:none;">Cancel edit</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Item master <span class="count" id="itemCount"></span></h2>
+      <div class="table-wrap" id="itemTableWrap"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Import items (CSV)</h2>
+      <p class="helper" style="margin-bottom:14px;">Upload a CSV with columns for item name, purchase price, and sale price — the same layout as an exported items.csv. An optional "Opening Stock" column logs a matching Stock In for each item, dated today. New rows are added to the item master; existing items are left as they are.</p>
+      <div class="filter-row">
+        <div class="field">
+          <label for="importItemsInput">Choose CSV file</label>
+          <input type="file" id="importItemsInput" accept=".csv,text/csv">
+        </div>
+      </div>
+      <div class="helper" id="importItemsHelper"></div>
+    </section>
+  </div>
+
+  <!-- SEARCH -->
+  <div class="view" id="view-search">
+    <section class="panel">
+      <h2>Search everything</h2>
+      <div class="filter-row">
+        <div class="field full" style="flex:1 1 320px;">
+          <label for="searchInput">Item name, supplier, department&hellip;</label>
+          <input type="text" id="searchInput" placeholder="e.g. Paracetamol, Kinapharma, OPD">
+        </div>
+        <button class="btn ghost small" id="searchClear">Clear</button>
+      </div>
+      <p class="helper" id="searchHelper">Start typing to search across the item master and every transaction.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Matching items <span class="count" id="searchItemCount"></span></h2>
+      <div class="table-wrap" id="searchItemWrap"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Matching transactions <span class="count" id="searchTxCount"></span></h2>
+      <div class="table-wrap" id="searchTxWrap"></div>
+    </section>
+  </div>
+
+  <!-- EXPORT -->
+  <div class="view" id="view-export">
+    <section class="panel">
+      <h2>Export spreadsheets</h2>
+      <p class="helper" style="margin-bottom:16px;">Pulls a CSV of exactly what's on screen elsewhere in the app — open it in Excel, Sheets, or anywhere else. PDF versions are formatted for printing or sharing as-is.</p>
+      <div class="filter-row">
+        <button class="btn" id="exportItemsBtn">Export items (CSV)</button>
+        <button class="btn" id="exportTxBtn">Export transactions (CSV)</button>
+        <button class="btn" id="exportStockBtn">Export stock (CSV)</button>
+      </div>
+      <div class="filter-row" style="margin-top:4px;">
+        <button class="btn ghost" id="exportItemsPdfBtn">Export items (PDF)</button>
+        <button class="btn ghost" id="exportTxPdfBtn">Export transactions (PDF)</button>
+        <button class="btn ghost" id="exportStockPdfBtn">Export stock (PDF)</button>
+      </div>
+      <div class="helper" id="pdfExportHelper" style="margin-top:10px;"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Alerts — close to expiry &amp; reorder level</h2>
+      <p class="helper" style="margin-bottom:16px;">Exports only the items currently flagged: expiring within 90 days (or already expired), and items at or below their reorder level.</p>
+      <div class="filter-row">
+        <button class="btn" id="exportExpiryBtn">Export close to expiry (CSV)</button>
+        <button class="btn" id="exportReorderBtn">Export reorder level (CSV)</button>
+      </div>
+      <div class="filter-row" style="margin-top:4px;">
+        <button class="btn ghost" id="exportExpiryPdfBtn">Export close to expiry (PDF)</button>
+        <button class="btn ghost" id="exportReorderPdfBtn">Export reorder level (PDF)</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Full backup</h2>
+      <p class="helper" style="margin-bottom:16px;">Everything in this app lives only in this browser. Download a backup now and then, and keep the file somewhere safe — you can load it back in on this device or any other.</p>
+      <div class="filter-row">
+        <button class="btn" id="exportBackupBtn">Download full backup (.json)</button>
+        <div class="field">
+          <label for="importBackupInput">Restore from backup</label>
+          <input type="file" id="importBackupInput" accept="application/json">
+        </div>
+      </div>
+      <div class="helper" id="importHelper"></div>
+    </section>
+  </div>
+
+  <!-- SECURITY / PASSWORD SETUP -->
+  <div class="view" id="view-security">
+    <section class="panel">
+      <h2>Accounts</h2>
+      <p class="helper" style="margin-bottom:16px;">Everyone using this device logs in with their own name and password. Frederick Addae-Mintah (Procurement Manager) is the owner account: only he can view the account list, remove an account, or grant/remove admin rights for other accounts.</p>
+      <div id="accountsListWrap"></div>
+      <button class="btn ghost small" id="addAccountBtn" style="margin-top:14px;">Add another account</button>
+    </section>
+
+    <div class="helper" id="passAdminOnlyNotice" style="display:none; margin:0 0 16px;">Only admin accounts (Frederick Addae-Mintah, and anyone he's granted admin rights to) can view or change the app passwords.</div>
+
+    <div id="adminOnlyPassPanels">
+    <section class="panel">
+      <h2>App open password</h2>
+      <p class="helper" style="margin-bottom:16px;">Locks the whole app — required the moment it's opened, before anything else is visible. This is a light, on-device lock, not full encryption.</p>
+      <div class="helper" id="passStatusApp" style="margin-bottom:16px;"></div>
+      <form class="entry" id="passFormApp">
+        <div class="field full" id="currentPassFieldApp" style="display:none;">
+          <label for="passCurrentApp">Current password</label>
+          <input type="password" id="passCurrentApp" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="passNewApp">New password</label>
+          <input type="password" id="passNewApp" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="passConfirmApp">Confirm new password</label>
+          <input type="password" id="passConfirmApp" autocomplete="off">
+        </div>
+        <div class="form-footer full">
+          <button type="submit" class="btn" id="passSaveBtnApp">Set password</button>
+          <button type="button" class="btn danger" id="passRemoveBtnApp" style="display:none;">Remove password</button>
+        </div>
+      </form>
+      <div class="helper" id="passHelperApp"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Items &amp; Export password</h2>
+      <p class="helper" style="margin-bottom:16px;">Separately locks just the <strong>Items</strong> and <strong>Export</strong> tabs — asked for every time either is opened. It can be the same as the app password or different.</p>
+      <div class="helper" id="passStatusItems" style="margin-bottom:16px;"></div>
+      <form class="entry" id="passFormItems">
+        <div class="field full" id="currentPassFieldItems" style="display:none;">
+          <label for="passCurrentItems">Current password</label>
+          <input type="password" id="passCurrentItems" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="passNewItems">New password</label>
+          <input type="password" id="passNewItems" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="passConfirmItems">Confirm new password</label>
+          <input type="password" id="passConfirmItems" autocomplete="off">
+        </div>
+        <div class="form-footer full">
+          <button type="submit" class="btn" id="passSaveBtnItems">Set password</button>
+          <button type="button" class="btn danger" id="passRemoveBtnItems" style="display:none;">Remove password</button>
+        </div>
+      </form>
+      <div class="helper" id="passHelperItems"></div>
+    </section>
+    </div>
+  </div>
+
+  <footer class="hint" id="footerDate">Bawjiase Medical Store</footer>
+</main>
+
+<!-- PASSWORD CHECK MODAL -->
+<div class="modal-overlay" id="passModalOverlay">
+  <div class="modal-box">
+    <h3>Password required</h3>
+    <p id="passModalMsg">Enter the app password to continue.</p>
+    <div class="field">
+      <label for="passModalInput">Password</label>
+      <input type="password" id="passModalInput" autocomplete="off">
+    </div>
+    <div class="modal-error" id="passModalError"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="passModalCancel">Cancel</button>
+      <button type="button" class="btn" id="passModalSubmit">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const LS_ITEMS = "bincard_items_v1";
+  const LS_TX = "bincard_tx_v1";
+  const LS_THEME = "bincard_theme_v1";
+
+  // ---------------- SHARED DATABASE (Supabase) ----------------
+  // This lets every device/staff member see the same items, stock, transactions
+  // and accounts instead of each browser having its own private copy.
+  //
+  // Setup (one-time):
+  //   1. Create a free project at https://supabase.com
+  //   2. Open the SQL editor and run the schema from supabase-schema.sql
+  //      (provided alongside this file).
+  //   3. Project Settings -> API -> copy the "Project URL" and the
+  //      "anon public" key into the two constants below.
+  //   4. Deploy this file to Vercel as normal — no server code needed.
+  //
+  // Until both values below are filled in, the app quietly falls back to
+  // this browser's local storage only (same behaviour as before).
+  const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
+  const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+  const db = (SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY' && window.supabase)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+  function dbWarn(action, error){ if(error) console.error(`Database ${action} failed — changes were saved on this device only:`, error.message || error); }
+
+  // Push the full current array for a table to Supabase: upsert everything
+  // present locally, then delete anything on the server no longer present
+  // locally (covers row deletion, since the app keeps whole arrays in memory).
+  async function syncTable(table, rows, mapOut){
+    if(!db) return;
+    try{
+      const payload = rows.map(mapOut);
+      if(payload.length){
+        const { error } = await db.from(table).upsert(payload, { onConflict: 'id' });
+        dbWarn(`save (${table})`, error);
+      }
+      const { data: existing, error: selErr } = await db.from(table).select('id');
+      if(!selErr && existing){
+        const keep = new Set(rows.map(r => r.id));
+        const toDelete = existing.map(r => r.id).filter(id => !keep.has(id));
+        if(toDelete.length){
+          const { error: delErr } = await db.from(table).delete().in('id', toDelete);
+          dbWarn(`delete (${table})`, delErr);
+        }
+      } else if(selErr){
+        dbWarn(`read (${table})`, selErr);
+      }
+    } catch(e){ dbWarn(`sync (${table})`, e); }
+  }
+
+  async function saveSetting(key, value){
+    if(value === null || value === undefined){ localStorage.removeItem(key); } else { localStorage.setItem(key, value); }
+    if(!db) return;
+    try{
+      if(value === null || value === undefined){
+        const { error } = await db.from('app_settings').delete().eq('key', key);
+        dbWarn('delete (app_settings)', error);
+      } else {
+        const { error } = await db.from('app_settings').upsert({ key, value }, { onConflict: 'key' });
+        dbWarn('save (app_settings)', error);
+      }
+    } catch(e){ dbWarn('sync (app_settings)', e); }
+  }
+
+  let items = JSON.parse(localStorage.getItem(LS_ITEMS) || "[]");
+  let txs = JSON.parse(localStorage.getItem(LS_TX) || "[]");
+
+  function saveItems(){
+    localStorage.setItem(LS_ITEMS, JSON.stringify(items));
+    syncTable('items', items, it => ({
+      id: it.id, name: it.name, pppu: it.pppu, sppu: it.sppu,
+      expiry: it.expiry || null,
+      reorder_level: (it.reorderLevel === null || it.reorderLevel === undefined) ? null : it.reorderLevel
+    }));
+  }
+  function saveTx(){
+    localStorage.setItem(LS_TX, JSON.stringify(txs));
+    syncTable('transactions', txs, t => ({
+      id: t.id, date: t.date, item_id: t.itemId, type: t.type,
+      quantity: t.quantity, price: t.price, amount: t.amount, profit: t.profit || 0,
+      party: t.party || null, by: t.by || null
+    }));
+  }
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+  function fmt(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function money(n){ return '₵' + fmt(n); }
+  function moneyPdf(n){ return 'GHS ' + fmt(n); }
+  function todayStr(){ return new Date().toISOString().slice(0,10); }
+  function ordinal(n){
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v-20)%10] || s[v] || s[0]);
+  }
+  function updateFooterDate(){
+    const el = document.getElementById('footerDate');
+    if(!el) return;
+    const d = new Date();
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    el.textContent = `Bawjiase Medical Store — ${ordinal(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  }
+  function itemById(id){ return items.find(i => i.id === id); }
+
+  function expiryInfo(dateStr){
+    if(!dateStr) return { label: '—', color: '' };
+    const today = new Date(todayStr());
+    const exp = new Date(dateStr);
+    const daysLeft = Math.round((exp - today) / 86400000);
+    if(daysLeft < 0) return { label: `${dateStr} (expired)`, color: 'var(--rust)' };
+    if(daysLeft <= 90) return { label: `${dateStr} (${daysLeft}d left)`, color: 'var(--amber)' };
+    return { label: dateStr, color: '' };
+  }
+
+  // ---------------- THEME ----------------
+  const themeBtn = document.getElementById('themeToggle');
+  function applyTheme(t){
+    document.documentElement.classList.toggle('light', t === 'light');
+    themeBtn.textContent = t === 'light' ? '☀' : '☾';
+  }
+  let theme = localStorage.getItem(LS_THEME) || 'dark';
+  applyTheme(theme);
+  themeBtn.addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(LS_THEME, theme);
+    applyTheme(theme);
+  });
+
+  // ---------------- PASSWORD LOCK ----------------
+  const LS_PASS_APP = "bincard_pass_app_hash_v1";
+  const LS_PASS_ITEMS = "bincard_pass_items_hash_v1";
+  const PROTECTED_VIEWS = ['items', 'export'];
+
+  async function sha256Hex(str){
+    if(window.crypto && window.crypto.subtle){
+      try{
+        const enc = new TextEncoder().encode(str);
+        const buf = await crypto.subtle.digest('SHA-256', enc);
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+      } catch(e){ /* fall through to offline fallback below */ }
+    }
+    // Fallback hash for contexts without crypto.subtle (e.g. some file:// setups).
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for(let i=0;i<str.length;i++){
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1>>>16), 2246822507) ^ Math.imul(h2 ^ (h2>>>13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2>>>16), 2246822507) ^ Math.imul(h1 ^ (h1>>>13), 3266489909);
+    return (h1>>>0).toString(16).padStart(8,'0') + (h2>>>0).toString(16).padStart(8,'0');
+  }
+
+  // Builds a self-contained set-password form wired to its own storage key,
+  // so the app-open password and the items/export password never share state.
+  function makePasswordSection(cfg){
+    const form = document.getElementById(cfg.formId);
+    const statusEl = document.getElementById(cfg.statusId);
+    const currentField = document.getElementById(cfg.currentFieldId);
+    const currentInput = document.getElementById(cfg.currentInputId);
+    const newInput = document.getElementById(cfg.newInputId);
+    const confirmInput = document.getElementById(cfg.confirmInputId);
+    const saveBtn = document.getElementById(cfg.saveBtnId);
+    const removeBtn = document.getElementById(cfg.removeBtnId);
+    const helper = document.getElementById(cfg.helperId);
+
+    function hasPass(){ return !!localStorage.getItem(cfg.storageKey); }
+    function getHash(){ return localStorage.getItem(cfg.storageKey) || ''; }
+
+    function renderStatus(){
+      const set = hasPass();
+      statusEl.textContent = set ? cfg.onText : cfg.offText;
+      currentField.style.display = set ? '' : 'none';
+      removeBtn.style.display = set ? '' : 'none';
+      saveBtn.textContent = set ? 'Change password' : 'Set password';
+    }
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      helper.style.color = 'var(--rust)';
+      const current = currentInput.value;
+      const next = newInput.value;
+      const confirmVal = confirmInput.value;
+      if(hasPass()){
+        const curHash = await sha256Hex(current);
+        if(curHash !== getHash()){
+          helper.textContent = 'Current password is incorrect.';
+          return;
+        }
+      }
+      if(!next || next.length < 4){
+        helper.textContent = 'New password must be at least 4 characters.';
+        return;
+      }
+      if(next !== confirmVal){
+        helper.textContent = "New password and confirmation don't match.";
+        return;
+      }
+      await saveSetting(cfg.storageKey, await sha256Hex(next));
+      form.reset();
+      helper.style.color = 'var(--teal)';
+      helper.textContent = 'Password saved.';
+      renderStatus();
+    });
+
+    removeBtn.addEventListener('click', async () => {
+      const curHash = await sha256Hex(currentInput.value);
+      if(curHash !== getHash()){
+        helper.style.color = 'var(--rust)';
+        helper.textContent = 'Enter your current password to remove it.';
+        return;
+      }
+      await saveSetting(cfg.storageKey, null);
+      form.reset();
+      helper.style.color = 'var(--teal)';
+      helper.textContent = 'Password removed.';
+      renderStatus();
+    });
+
+    return { hasPass, getHash, renderStatus };
+  }
+
+  const appPass = makePasswordSection({
+    storageKey: LS_PASS_APP,
+    formId: 'passFormApp', statusId: 'passStatusApp',
+    currentFieldId: 'currentPassFieldApp', currentInputId: 'passCurrentApp',
+    newInputId: 'passNewApp', confirmInputId: 'passConfirmApp',
+    saveBtnId: 'passSaveBtnApp', removeBtnId: 'passRemoveBtnApp', helperId: 'passHelperApp',
+    onText: 'A password is currently set — the app will ask for it every time it opens.',
+    offText: 'No password is set yet — the app opens without a prompt.'
+  });
+
+  const itemsPass = makePasswordSection({
+    storageKey: LS_PASS_ITEMS,
+    formId: 'passFormItems', statusId: 'passStatusItems',
+    currentFieldId: 'currentPassFieldItems', currentInputId: 'passCurrentItems',
+    newInputId: 'passNewItems', confirmInputId: 'passConfirmItems',
+    saveBtnId: 'passSaveBtnItems', removeBtnId: 'passRemoveBtnItems', helperId: 'passHelperItems',
+    onText: 'A password is currently set — Items and Export will ask for it.',
+    offText: 'No password is set yet — Items and Export are open to anyone using this browser.'
+  });
+
+  function renderPassStatus(){
+    const admin = isAdminUser();
+    document.getElementById('adminOnlyPassPanels').style.display = admin ? '' : 'none';
+    document.getElementById('passAdminOnlyNotice').style.display = admin ? 'none' : '';
+    if(!admin) return;
+    appPass.renderStatus();
+    itemsPass.renderStatus();
+  }
+
+  // ---------------- FULL APP LOCK (on open) ----------------
+  const appLockScreen = document.getElementById('appLockScreen');
+  const appLockInput = document.getElementById('appLockInput');
+  const appLockError = document.getElementById('appLockError');
+
+  function showAppLock(){
+    appLockScreen.style.display = 'flex';
+    appLockInput.value = '';
+    appLockError.textContent = '';
+    setTimeout(() => appLockInput.focus(), 50);
+  }
+  function hideAppLock(){ appLockScreen.style.display = 'none'; }
+
+  async function tryAppUnlock(){
+    const hash = await sha256Hex(appLockInput.value);
+    if(hash === appPass.getHash()){
+      hideAppLock();
+    } else {
+      appLockError.textContent = 'Incorrect password.';
+      appLockInput.value = '';
+      appLockInput.focus();
+    }
+  }
+  document.getElementById('appLockSubmit').addEventListener('click', tryAppUnlock);
+  appLockInput.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); tryAppUnlock(); }
+  });
+
+  // ---------------- ACCOUNTS / LOGIN ----------------
+  const LS_USERS = "bincard_users_v1";
+  const LS_CURRENT_USER = "bincard_current_user_v1";
+
+  let users = JSON.parse(localStorage.getItem(LS_USERS) || "[]");
+  let currentUser = null;
+
+  function saveUsers(){
+    localStorage.setItem(LS_USERS, JSON.stringify(users));
+    syncTable('app_users', users, u => ({
+      id: u.id, name: u.name, username: u.username, role: u.role || null,
+      is_admin: !!u.isAdmin, pass_hash: u.passHash, created_at: u.createdAt || null
+    }));
+  }
+  function normalizeUsername(u){ return (u || '').trim().toLowerCase(); }
+  // This account (Frederick Addae-Mintah) is the permanent super admin. It always has
+  // admin rights, can never be removed or demoted, and is the ONLY account that can
+  // grant or revoke admin rights on other accounts.
+  const ADMIN_USERNAME = 'addae_mintah';
+  function isSuperAdminUser(u){
+    u = u || currentUser;
+    return !!(u && normalizeUsername(u.username) === ADMIN_USERNAME);
+  }
+  // Any account with admin rights (the super admin, or someone the super admin promoted)
+  // can view the accounts list and remove accounts. Only the super admin can grant/revoke
+  // that "isAdmin" flag itself.
+  function isAdminUser(u){
+    u = u || currentUser;
+    return !!(u && (isSuperAdminUser(u) || u.isAdmin));
+  }
+  function findUserByUsername(u){
+    const key = normalizeUsername(u);
+    return users.find(x => x.username === key);
+  }
+  function initials(name){
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if(!parts.length) return '?';
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length-1][0] : '')).toUpperCase();
+  }
+
+  const authScreen = document.getElementById('authScreen');
+  const authTabLogin = document.getElementById('authTabLogin');
+  const authTabRegister = document.getElementById('authTabRegister');
+  const loginForm = document.getElementById('loginForm');
+  const loginUsername = document.getElementById('loginUsername');
+  const loginPassword = document.getElementById('loginPassword');
+  const loginError = document.getElementById('loginError');
+  const registerForm = document.getElementById('registerForm');
+  const regName = document.getElementById('regName');
+  const regUsername = document.getElementById('regUsername');
+  const regRole = document.getElementById('regRole');
+  const regPassword = document.getElementById('regPassword');
+  const regConfirm = document.getElementById('regConfirm');
+  const registerError = document.getElementById('registerError');
+
+  function showAuthScreen(){ authScreen.style.display = 'flex'; }
+  function hideAuthScreen(){ authScreen.style.display = 'none'; }
+
+  function setAuthTab(tab){
+    const isLogin = tab !== 'register';
+    authTabLogin.classList.toggle('active', isLogin);
+    authTabRegister.classList.toggle('active', !isLogin);
+    loginForm.style.display = isLogin ? 'block' : 'none';
+    registerForm.style.display = isLogin ? 'none' : 'block';
+    loginError.textContent = '';
+    registerError.textContent = '';
+  }
+  authTabLogin.addEventListener('click', () => setAuthTab('login'));
+  authTabRegister.addEventListener('click', () => setAuthTab('register'));
+
+  function renderUserBadge(){
+    const badge = document.getElementById('currentUserBadge');
+    if(!currentUser){ badge.style.display = 'none'; return; }
+    badge.style.display = 'flex';
+    document.getElementById('currentUserAvatar').textContent = initials(currentUser.name);
+    document.getElementById('currentUserName').textContent = currentUser.name;
+  }
+
+  function renderAccountsList(){
+    const wrap = document.getElementById('accountsListWrap');
+    if(!wrap) return;
+    if(!isAdminUser()){
+      wrap.innerHTML = `<div class="helper" style="margin:0;">Only Frederick Addae-Mintah (Procurement Manager) can view the list of accounts.</div>`;
+      return;
+    }
+    if(!users.length){
+      wrap.innerHTML = `<div class="helper" style="margin:0;">No accounts yet.</div>`;
+      return;
+    }
+    const iAmSuperAdmin = isSuperAdminUser();
+    wrap.innerHTML = users.map(u => {
+      const superAdmin = isSuperAdminUser(u);
+      const admin = isAdminUser(u);
+      const adminBadge = superAdmin
+        ? ' · <span style="color:var(--amber);">Admin (owner)</span>'
+        : (admin ? ' · <span style="color:var(--amber);">Admin</span>' : '');
+      let adminBtn = '';
+      if(iAmSuperAdmin && !superAdmin){
+        adminBtn = admin
+          ? `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Remove admin</button>`
+          : `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Make admin</button>`;
+      }
+      const removeBtn = (users.length > 1 && !superAdmin) ? `<button type="button" class="btn small danger" onclick="BinCard.deleteAccount('${u.id}')">Remove</button>` : '';
+      return `
+      <div class="account-row">
+        <div>
+          <div class="name">${escapeHtml(u.name)}${currentUser && currentUser.id === u.id ? ' <span class="helper" style="display:inline;margin:0;">(you)</span>' : ''}</div>
+          <div class="helper" style="margin:2px 0 0;">@${escapeHtml(u.username)}${u.role ? ' · ' + escapeHtml(u.role) : ''}${adminBadge}</div>
+        </div>
+        <div style="display:flex; gap:8px;">${adminBtn}${removeBtn}</div>
+      </div>
+    `;
+    }).join('');
+  }
+
+  function toggleAdmin(id){
+    if(!isSuperAdminUser()){ alert('Only Frederick Addae-Mintah (Procurement Manager) can grant or remove admin rights.'); return; }
+    const u = users.find(x => x.id === id);
+    if(!u) return;
+    if(isSuperAdminUser(u)) return; // owner's admin status can't be changed
+    u.isAdmin = !u.isAdmin;
+    saveUsers();
+    renderAccountsList();
+  }
+
+  function completeLogin(user){
+    currentUser = user;
+    localStorage.setItem(LS_CURRENT_USER, user.id);
+    hideAuthScreen();
+    renderUserBadge();
+    renderAccountsList();
+    if(appPass.hasPass()) showAppLock(); else hideAppLock();
+    enforceInitialViewGate();
+  }
+
+  async function tryLogin(){
+    loginError.textContent = '';
+    const user = findUserByUsername(loginUsername.value);
+    if(!user){ loginError.textContent = 'No account with that username.'; return; }
+    const hash = await sha256Hex(loginPassword.value);
+    if(hash !== user.passHash){
+      loginError.textContent = 'Incorrect password.';
+      loginPassword.value = '';
+      loginPassword.focus();
+      return;
+    }
+    loginPassword.value = '';
+    completeLogin(user);
+  }
+
+  async function tryRegister(){
+    registerError.textContent = '';
+    const name = regName.value.trim();
+    const uname = normalizeUsername(regUsername.value);
+    const pass = regPassword.value;
+    const confirm = regConfirm.value;
+    if(!name){ registerError.textContent = 'Enter your name.'; return; }
+    if(!/^[a-z0-9._]{3,20}$/.test(uname)){ registerError.textContent = 'Username: 3-20 characters, letters, numbers, "." or "_" only.'; return; }
+    if(findUserByUsername(uname)){ registerError.textContent = 'That username is already taken.'; return; }
+    if(pass.length < 4){ registerError.textContent = 'Password must be at least 4 characters.'; return; }
+    if(pass !== confirm){ registerError.textContent = "Password and confirmation don't match."; return; }
+    const user = { id: uid(), name, username: uname, role: regRole.value, isAdmin: false, passHash: await sha256Hex(pass), createdAt: todayStr() };
+    users.push(user);
+    saveUsers();
+    regName.value = ''; regUsername.value = ''; regPassword.value = ''; regConfirm.value = '';
+    completeLogin(user);
+  }
+
+  loginForm.addEventListener('submit', e => { e.preventDefault(); tryLogin(); });
+  registerForm.addEventListener('submit', e => { e.preventDefault(); tryRegister(); });
+
+  document.getElementById('logoutBtn').addEventListener('click', () => {
+    if(!confirm('Log out of this account?')) return;
+    currentUser = null;
+    localStorage.removeItem(LS_CURRENT_USER);
+    renderUserBadge();
+    loginUsername.value = '';
+    loginPassword.value = '';
+    setAuthTab('login');
+    showAuthScreen();
+  });
+
+  document.getElementById('addAccountBtn').addEventListener('click', () => {
+    if(!confirm('Log out and create another account now?')) return;
+    currentUser = null;
+    localStorage.removeItem(LS_CURRENT_USER);
+    renderUserBadge();
+    setAuthTab('register');
+    showAuthScreen();
+  });
+
+  function deleteAccount(id){
+    if(!isAdminUser()){ alert('Only Frederick Addae-Mintah (Procurement Manager) can remove accounts.'); return; }
+    if(users.length <= 1){ alert("You can't remove the only account."); return; }
+    const u = users.find(x => x.id === id);
+    if(!u) return;
+    if(isSuperAdminUser(u)){ alert("Frederick Addae-Mintah's account is the owner account and can't be removed."); return; }
+    if(!confirm(`Remove the account "${u.name}"? This only removes their login — it doesn't touch any inventory data.`)) return;
+    users = users.filter(x => x.id !== id);
+    saveUsers();
+    if(currentUser && currentUser.id === id){
+      currentUser = null;
+      localStorage.removeItem(LS_CURRENT_USER);
+      renderUserBadge();
+      setAuthTab('login');
+      showAuthScreen();
+    }
+    renderAccountsList();
+  }
+
+  // Boot: figure out whether someone is already logged in on this device.
+  (function bootAuth(){
+    const savedId = localStorage.getItem(LS_CURRENT_USER);
+    currentUser = savedId ? (users.find(u => u.id === savedId) || null) : null;
+    if(currentUser){
+      hideAuthScreen();
+      renderUserBadge();
+      renderAccountsList();
+      if(appPass.hasPass()) showAppLock(); else hideAppLock();
+    } else {
+      hideAppLock();
+      setAuthTab(users.length ? 'login' : 'register');
+      showAuthScreen();
+      setTimeout(() => (users.length ? loginUsername : regName).focus(), 50);
+    }
+  })();
+
+  const passModalOverlay = document.getElementById('passModalOverlay');
+  const passModalInput = document.getElementById('passModalInput');
+  const passModalError = document.getElementById('passModalError');
+  let pendingView = null;
+
+  function openPassModal(view){
+    pendingView = view;
+    passModalInput.value = '';
+    passModalError.textContent = '';
+    passModalOverlay.classList.add('active');
+    setTimeout(() => passModalInput.focus(), 50);
+  }
+  function closePassModal(){
+    passModalOverlay.classList.remove('active');
+    pendingView = null;
+  }
+  async function tryUnlock(){
+    const hash = await sha256Hex(passModalInput.value);
+    if(hash === itemsPass.getHash()){
+      const view = pendingView;
+      closePassModal();
+      switchToView(view);
+    } else {
+      passModalError.textContent = 'Incorrect password.';
+      passModalInput.value = '';
+      passModalInput.focus();
+    }
+  }
+  document.getElementById('passModalSubmit').addEventListener('click', tryUnlock);
+  document.getElementById('passModalCancel').addEventListener('click', closePassModal);
+  passModalOverlay.addEventListener('click', e => { if(e.target === passModalOverlay) closePassModal(); });
+  passModalInput.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); tryUnlock(); }
+    if(e.key === 'Escape'){ e.preventDefault(); closePassModal(); }
+  });
+
+  // ---------------- NAV ----------------
+  const navButtons = document.querySelectorAll('nav button');
+
+  function switchToView(view){
+    navButtons.forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + view).classList.add('active');
+    if(view === 'stock') renderStock();
+    if(view === 'transactions') renderTxTable();
+    if(view === 'items') renderItemTable();
+    if(view === 'dashboard') renderDashboard();
+    if(view === 'security') renderPassStatus();
+    if(view === 'search') renderSearch();
+  }
+
+  // If Dashboard is password-protected, never let it sit visible as the
+  // default landing screen — land on Transactions instead until unlocked.
+  function enforceInitialViewGate(){
+    if(PROTECTED_VIEWS.includes('dashboard') && itemsPass.hasPass()){
+      switchToView('transactions');
+    }
+  }
+
+  navButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+      if(PROTECTED_VIEWS.includes(view) && itemsPass.hasPass()){
+        openPassModal(view);
+        return;
+      }
+      switchToView(view);
+    });
+  });
+
+  document.getElementById('stockSearch').addEventListener('input', renderStock);
+  document.getElementById('stockSort').addEventListener('change', renderStock);
+  document.getElementById('stockLowOnly').addEventListener('change', renderStock);
+
+  // ================= ITEMS =================
+  const itemForm = document.getElementById('itemForm');
+  const itemName = document.getElementById('itemName');
+  const itemPPPU = document.getElementById('itemPPPU');
+  const itemSPPU = document.getElementById('itemSPPU');
+  const itemExpiry = document.getElementById('itemExpiry');
+  const itemReorder = document.getElementById('itemReorder');
+  const itemEditId = document.getElementById('itemEditId');
+  const itemFormTitle = document.getElementById('itemFormTitle');
+  const itemSubmitBtn = document.getElementById('itemSubmitBtn');
+  const itemCancelEdit = document.getElementById('itemCancelEdit');
+
+  function resetItemForm(){
+    itemForm.reset();
+    itemEditId.value = '';
+    itemFormTitle.textContent = 'Add an item';
+    itemSubmitBtn.textContent = 'Add item';
+    itemCancelEdit.style.display = 'none';
+  }
+
+  itemForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const name = itemName.value.trim();
+    const pppu = parseFloat(itemPPPU.value);
+    const sppu = parseFloat(itemSPPU.value);
+    const expiry = itemExpiry.value || '';
+    const reorderLevel = itemReorder.value === '' ? null : parseFloat(itemReorder.value);
+    if(!name) return;
+    if(itemEditId.value){
+      const it = itemById(itemEditId.value);
+      if(it){ it.name = name; it.pppu = pppu; it.sppu = sppu; it.expiry = expiry; it.reorderLevel = reorderLevel; }
+    } else {
+      items.push({ id: uid(), name, pppu, sppu, expiry, reorderLevel });
+    }
+    saveItems();
+    resetItemForm();
+    renderItemTable();
+    renderItemSelect();
+    renderStock();
+    renderDashboard();
+  });
+
+  itemCancelEdit.addEventListener('click', resetItemForm);
+
+  function editItem(id){
+    const it = itemById(id);
+    if(!it) return;
+    itemEditId.value = it.id;
+    itemName.value = it.name;
+    itemPPPU.value = it.pppu;
+    itemSPPU.value = it.sppu;
+    itemExpiry.value = it.expiry || '';
+    itemReorder.value = (it.reorderLevel === null || it.reorderLevel === undefined) ? '' : it.reorderLevel;
+    itemFormTitle.textContent = 'Edit item';
+    itemSubmitBtn.textContent = 'Save changes';
+    itemCancelEdit.style.display = 'inline-block';
+    document.getElementById('view-items').scrollIntoView({behavior:'smooth'});
+  }
+
+  function deleteItem(id){
+    const inUse = txs.some(t => t.itemId === id);
+    if(inUse){
+      alert("This item has transactions logged against it. Delete those first, or keep the item on file.");
+      return;
+    }
+    if(!confirm('Remove this item from the item master?')) return;
+    items = items.filter(i => i.id !== id);
+    saveItems();
+    renderItemTable();
+    renderItemSelect();
+  }
+
+  function renderItemTable(){
+    const wrap = document.getElementById('itemTableWrap');
+    document.getElementById('itemCount').textContent = items.length ? `(${items.length})` : '';
+    if(!items.length){
+      wrap.innerHTML = `<div class="empty"><div class="display">No items on file yet</div>Add your first item above — name it, price it, and it'll show up here and in the transaction form.</div>`;
+      return;
+    }
+    let rows = items.map(it => {
+      const st = stockFor(it.id);
+      const low = it.reorderLevel !== null && it.reorderLevel !== undefined && st.balance <= it.reorderLevel;
+      const exp = expiryInfo(it.expiry);
+      return `<tr>
+        <td class="name">${escapeHtml(it.name)}</td>
+        <td>${money(it.pppu)}</td>
+        <td>${money(it.sppu)}</td>
+        <td class="mono" style="${st.balance<0?'color:var(--rust)':''}">${fmt(st.balance)}</td>
+        <td class="mono" style="${low?'color:var(--rust)':''}">${(it.reorderLevel === null || it.reorderLevel === undefined) ? '—' : fmt(it.reorderLevel)}${low ? ' ⚠' : ''}</td>
+        <td class="mono" style="${exp.color?`color:${exp.color}`:''}">${exp.label}</td>
+        <td>
+          <div class="row-actions">
+            <button class="btn small ghost" onclick="BinCard.editItem('${it.id}')">Edit</button>
+            <button class="btn small danger" onclick="BinCard.deleteItem('${it.id}')">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Item name</th><th>Purchase price (₵)</th><th>Sale price (₵)</th><th>Balance stock</th><th>Reorder level</th><th>Expiry date</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function renderItemSelect(){
+    const sel = document.getElementById('txItem');
+    const current = sel.value;
+    sel.innerHTML = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+    if(items.some(i => i.id === current)) sel.value = current;
+    updatePriceSuggestion();
+  }
+
+  // ================= TRANSACTIONS =================
+  const txForm = document.getElementById('txForm');
+  const txDate = document.getElementById('txDate');
+  const txItem = document.getElementById('txItem');
+  const txQty = document.getElementById('txQty');
+  const txPrice = document.getElementById('txPrice');
+  const txAmount = document.getElementById('txAmount');
+  const txEditId = document.getElementById('txEditId');
+  const txFormTitle = document.getElementById('txFormTitle');
+  const txSubmitBtn = document.getElementById('txSubmitBtn');
+  const txCancelEdit = document.getElementById('txCancelEdit');
+  const txHelper = document.getElementById('txHelper');
+  let currentType = 'Stock In';
+
+  const txParty = document.getElementById('txParty');
+  const txPartyLabel = document.getElementById('txPartyLabel');
+  const txPartyList = document.getElementById('txPartyList');
+
+  function updatePartyField(){
+    if(currentType === 'Stock In'){
+      txPartyLabel.textContent = 'Supplier';
+      txParty.placeholder = 'e.g. Kinapharma Ltd.';
+    } else {
+      txPartyLabel.textContent = 'Department / Unit';
+      txParty.placeholder = 'e.g. OPD, Maternity Ward, Laboratory';
+    }
+    refreshPartyList();
+  }
+
+  function refreshPartyList(){
+    const names = new Set(
+      txs.filter(t => t.type === currentType && t.party).map(t => t.party)
+    );
+    txPartyList.innerHTML = [...names].sort().map(n => `<option value="${escapeHtml(n)}">`).join('');
+  }
+
+  document.querySelectorAll('.type-toggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      currentType = b.dataset.type;
+      document.querySelectorAll('.type-toggle button').forEach(x => x.classList.remove('sel','in','out'));
+      b.classList.add('sel', currentType === 'Stock In' ? 'in' : 'out');
+      updatePriceSuggestion();
+      updatePartyField();
+    });
+  });
+
+  txDate.value = todayStr();
+
+  function updatePriceSuggestion(){
+    const it = itemById(txItem.value);
+    if(!it) { txHelper.textContent=''; return; }
+    if(!txEditId.value){
+      txPrice.value = currentType === 'Stock In' ? it.pppu : it.sppu;
+    }
+    if(currentType === 'Stock Out'){
+      txHelper.textContent = `Cost on file: ${money(it.pppu)} / unit. Profit is calculated against this cost.`;
+    } else {
+      txHelper.textContent = `Suggested from item master — adjust if this purchase came in at a different price.`;
+    }
+    updateAmount();
+  }
+  txItem.addEventListener('change', updatePriceSuggestion);
+
+  function updateAmount(){
+    const qty = parseFloat(txQty.value) || 0;
+    const price = parseFloat(txPrice.value) || 0;
+    txAmount.value = money(qty * price);
+  }
+  txQty.addEventListener('input', updateAmount);
+  txPrice.addEventListener('input', updateAmount);
+
+  function resetTxForm(){
+    txForm.reset();
+    txEditId.value = '';
+    txDate.value = todayStr();
+    currentType = 'Stock In';
+    document.querySelectorAll('.type-toggle button').forEach(x => x.classList.remove('sel','in','out'));
+    document.querySelector('.type-toggle button[data-type="Stock In"]').classList.add('sel','in');
+    txFormTitle.textContent = 'Log a stock movement';
+    txSubmitBtn.textContent = 'Add transaction';
+    txCancelEdit.style.display = 'none';
+    txParty.value = '';
+    updatePriceSuggestion();
+    updatePartyField();
+  }
+
+  txForm.addEventListener('submit', e => {
+    e.preventDefault();
+    if(!items.length){ alert('Add at least one item in the Item Master first.'); return; }
+    const it = itemById(txItem.value);
+    if(!it){ alert('Pick an item.'); return; }
+    const qty = parseFloat(txQty.value);
+    const price = parseFloat(txPrice.value);
+    const amount = qty * price;
+    const profit = currentType === 'Stock Out' ? (price - it.pppu) * qty : 0;
+    const party = txParty.value.trim();
+
+    if(currentType === 'Stock Out'){
+      const bal = stockFor(it.id).balance;
+      const existing = txEditId.value ? txs.find(t=>t.id===txEditId.value) : null;
+      const availBal = existing ? bal + (existing.type==='Stock Out'? existing.quantity : -existing.quantity) : bal;
+      if(qty > availBal){
+        if(!confirm(`Only ${fmt(availBal)} units of "${it.name}" are in stock. Log this Stock Out anyway (balance will go negative)?`)) return;
+      }
+    }
+
+    if(txEditId.value){
+      const t = txs.find(x => x.id === txEditId.value);
+      Object.assign(t, { date: txDate.value, itemId: it.id, type: currentType, quantity: qty, price, amount, profit, party });
+    } else {
+      txs.push({ id: uid(), date: txDate.value, itemId: it.id, type: currentType, quantity: qty, price, amount, profit, party, by: currentUser ? currentUser.name : '' });
+    }
+    saveTx();
+    resetTxForm();
+    renderTxTable();
+    renderStock();
+    renderDashboard();
+    renderItemTable();
+  });
+
+  txCancelEdit.addEventListener('click', resetTxForm);
+
+  function editTx(id){
+    const t = txs.find(x => x.id === id);
+    if(!t) return;
+    txEditId.value = t.id;
+    txDate.value = t.date;
+    txItem.value = t.itemId;
+    currentType = t.type;
+    document.querySelectorAll('.type-toggle button').forEach(x => x.classList.remove('sel','in','out'));
+    document.querySelector(`.type-toggle button[data-type="${t.type}"]`).classList.add('sel', t.type==='Stock In'?'in':'out');
+    txQty.value = t.quantity;
+    txPrice.value = t.price;
+    updateAmount();
+    updatePartyField();
+    txParty.value = t.party || '';
+    txFormTitle.textContent = 'Edit transaction';
+    txSubmitBtn.textContent = 'Save changes';
+    txCancelEdit.style.display = 'inline-block';
+    document.getElementById('view-transactions').scrollIntoView({behavior:'smooth'});
+  }
+
+  function deleteTx(id){
+    if(!confirm('Delete this transaction? This will also update the stock balance.')) return;
+    txs = txs.filter(t => t.id !== id);
+    saveTx();
+    renderTxTable();
+    renderStock();
+    renderDashboard();
+    renderItemTable();
+  }
+
+  function renderTxTable(){
+    const wrap = document.getElementById('txTableWrap');
+    document.getElementById('txCount').textContent = txs.length ? `(${txs.length})` : '';
+    if(!txs.length){
+      wrap.innerHTML = `<div class="empty"><div class="display">No transactions logged yet</div>Log a purchase or a sale above and it'll appear here, and flow straight into the stock balances and dashboard.</div>`;
+      return;
+    }
+    const sorted = [...txs].sort((a,b) => b.date.localeCompare(a.date));
+    const rows = sorted.map(t => {
+      const it = itemById(t.itemId);
+      return `<tr>
+        <td>${t.date}</td>
+        <td class="name">${it ? escapeHtml(it.name) : '<em>deleted item</em>'}</td>
+        <td><span class="tag ${t.type==='Stock In'?'in':'out'}">${t.type === 'Stock In' ? 'In' : 'Out'}</span></td>
+        <td>${fmt(t.quantity)}</td>
+        <td>${money(t.price)}</td>
+        <td>${money(t.amount)}</td>
+        <td style="${t.profit<0?'color:var(--rust)':t.profit>0?'color:var(--teal)':''}">${t.type==='Stock Out' ? money(t.profit) : '—'}</td>
+        <td class="name">${t.party ? escapeHtml(t.party) : '—'}</td>
+        <td class="name">${t.by ? escapeHtml(t.by) : '—'}</td>
+        <td>
+          <div class="row-actions">
+            <button class="btn small ghost" onclick="BinCard.editTx('${t.id}')">Edit</button>
+            <button class="btn small danger" onclick="BinCard.deleteTx('${t.id}')">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Price (₵)</th><th>Amount (₵)</th><th>Profit (₵)</th><th>Supplier / Dept</th><th>Logged by</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  // ================= STOCK ROLLUP =================
+  function stockFor(itemId){
+    let stockIn = 0, stockOut = 0, txCount = 0, lastTx = null;
+    for(const t of txs){
+      if(t.itemId !== itemId) continue;
+      if(t.type === 'Stock In') stockIn += t.quantity;
+      else stockOut += t.quantity;
+      txCount++;
+      if(!lastTx || t.date > lastTx.date || (t.date === lastTx.date && t.id > lastTx.id)) lastTx = t;
+    }
+    const balance = stockIn - stockOut;
+    const it = itemById(itemId);
+    const value = it ? balance * it.pppu : 0;
+    const saleValue = it ? balance * it.sppu : 0;
+    return { stockIn, stockOut, balance, value, saleValue, txCount, lastTx };
+  }
+
+  function renderStock(){
+    const grid = document.getElementById('binGrid');
+    const summaryEl = document.getElementById('stockSummary');
+    if(!items.length){
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1;"><div class="display">Nothing to card up yet</div>Add items in the Item Master and log a Stock In to see bin cards appear here.</div>`;
+      summaryEl.textContent = '';
+      return;
+    }
+    const q = (document.getElementById('stockSearch').value || '').trim().toLowerCase();
+    const sortBy = document.getElementById('stockSort').value;
+    const lowOnly = document.getElementById('stockLowOnly').checked;
+
+    let rows = items.map(it => ({ it, s: stockFor(it.id) }));
+    rows = rows.map(r => ({
+      ...r,
+      low: r.it.reorderLevel !== null && r.it.reorderLevel !== undefined && r.s.balance <= r.it.reorderLevel
+    }));
+
+    if(q) rows = rows.filter(r => r.it.name.toLowerCase().includes(q));
+    if(lowOnly) rows = rows.filter(r => r.low || r.s.balance < 0);
+
+    rows.sort((a,b) => {
+      if(sortBy === 'balance-asc') return a.s.balance - b.s.balance;
+      if(sortBy === 'balance-desc') return b.s.balance - a.s.balance;
+      if(sortBy === 'value-desc') return b.s.value - a.s.value;
+      if(sortBy === 'recent'){
+        const ad = a.s.lastTx ? a.s.lastTx.date : '';
+        const bd = b.s.lastTx ? b.s.lastTx.date : '';
+        return bd.localeCompare(ad);
+      }
+      return a.it.name.localeCompare(b.it.name);
+    });
+
+    const lowCount = items.filter(it => {
+      const s = stockFor(it.id);
+      return (it.reorderLevel !== null && it.reorderLevel !== undefined && s.balance <= it.reorderLevel) || s.balance < 0;
+    }).length;
+    summaryEl.textContent = `Showing ${rows.length} of ${items.length} item${items.length===1?'':'s'}${lowCount ? ` — ${lowCount} at or below reorder level` : ''}`;
+
+    if(!rows.length){
+      grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">No items match that search/filter.</div>`;
+      return;
+    }
+
+    grid.innerHTML = rows.map(({it, s, low}) => {
+      const exp = expiryInfo(it.expiry);
+      const reorderLine = (it.reorderLevel === null || it.reorderLevel === undefined)
+        ? ''
+        : `<div class="value-line" style="${low?'color:var(--rust)':''}">Reorder level: <strong>${fmt(it.reorderLevel)}</strong>${low ? ' — reorder now ⚠' : ''}</div>`;
+      const expiryLine = it.expiry
+        ? `<div class="value-line" style="${exp.color?`color:${exp.color}`:''}">Expiry: <strong>${exp.label}</strong></div>`
+        : '';
+      return `<div class="bin-card">
+        <div class="sub-label">Balance on hand</div>
+        <div class="item-name">${escapeHtml(it.name)}</div>
+        <div class="balance ${s.balance<0||low?'neg':''}">${fmt(s.balance)}</div>
+        <div class="split">
+          <div><span>Stock in</span>${fmt(s.stockIn)}</div>
+          <div><span>Stock out</span>${fmt(s.stockOut)}</div>
+        </div>
+        ${reorderLine}
+        ${expiryLine}
+      </div>`;
+    }).join('');
+  }
+
+  // ================= SEARCH =================
+  const searchInput = document.getElementById('searchInput');
+  const searchClear = document.getElementById('searchClear');
+  const searchHelper = document.getElementById('searchHelper');
+
+  function renderSearch(){
+    const q = searchInput.value.trim().toLowerCase();
+    const itemWrap = document.getElementById('searchItemWrap');
+    const txWrap = document.getElementById('searchTxWrap');
+    const itemCountEl = document.getElementById('searchItemCount');
+    const txCountEl = document.getElementById('searchTxCount');
+
+    if(!q){
+      searchHelper.textContent = 'Start typing to search across the item master and every transaction.';
+      itemWrap.innerHTML = '';
+      txWrap.innerHTML = '';
+      itemCountEl.textContent = '';
+      txCountEl.textContent = '';
+      return;
+    }
+    searchHelper.textContent = `Showing results for "${searchInput.value.trim()}".`;
+
+    const matchedItems = items.filter(it => it.name.toLowerCase().includes(q));
+    itemCountEl.textContent = matchedItems.length ? `(${matchedItems.length})` : '';
+    if(!matchedItems.length){
+      itemWrap.innerHTML = `<div class="empty">No items match that search.</div>`;
+    } else {
+      const rows = matchedItems.map(it => {
+        const st = stockFor(it.id);
+        const low = it.reorderLevel !== null && it.reorderLevel !== undefined && st.balance <= it.reorderLevel;
+        const exp = expiryInfo(it.expiry);
+        return `<tr>
+          <td class="name">${escapeHtml(it.name)}</td>
+          <td>${money(it.pppu)}</td>
+          <td>${money(it.sppu)}</td>
+          <td class="mono" style="${st.balance<0?'color:var(--rust)':''}">${fmt(st.balance)}</td>
+          <td class="mono" style="${exp.color?`color:${exp.color}`:''}">${exp.label}</td>
+        </tr>`;
+      }).join('');
+      itemWrap.innerHTML = `<table>
+        <thead><tr><th>Item name</th><th>Purchase price (₵)</th><th>Sale price (₵)</th><th>Balance stock</th><th>Expiry date</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    const matchedTx = txs.filter(t => {
+      const it = itemById(t.itemId);
+      const name = it ? it.name.toLowerCase() : '';
+      const party = (t.party || '').toLowerCase();
+      return name.includes(q) || party.includes(q);
+    }).sort((a,b) => b.date.localeCompare(a.date));
+    txCountEl.textContent = matchedTx.length ? `(${matchedTx.length})` : '';
+    if(!matchedTx.length){
+      txWrap.innerHTML = `<div class="empty">No transactions match that search.</div>`;
+    } else {
+      const rows = matchedTx.map(t => {
+        const it = itemById(t.itemId);
+        return `<tr>
+          <td>${t.date}</td>
+          <td class="name">${it ? escapeHtml(it.name) : '<em>deleted item</em>'}</td>
+          <td><span class="tag ${t.type==='Stock In'?'in':'out'}">${t.type === 'Stock In' ? 'In' : 'Out'}</span></td>
+          <td>${fmt(t.quantity)}</td>
+          <td>${money(t.price)}</td>
+          <td>${money(t.amount)}</td>
+          <td class="name">${t.party ? escapeHtml(t.party) : '—'}</td>
+        </tr>`;
+      }).join('');
+      txWrap.innerHTML = `<table>
+        <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Price (₵)</th><th>Amount (₵)</th><th>Supplier / Dept</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    }
+  }
+  searchInput.addEventListener('input', renderSearch);
+  searchClear.addEventListener('click', () => { searchInput.value = ''; renderSearch(); searchInput.focus(); });
+
+  // ================= DASHBOARD =================
+  const fromDate = document.getElementById('fromDate');
+  const toDate = document.getElementById('toDate');
+
+  function monthRange(){
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: first.toISOString().slice(0,10), to: now.toISOString().slice(0,10) };
+  }
+  const mr = monthRange();
+  fromDate.value = mr.from;
+  toDate.value = mr.to;
+
+  document.getElementById('resetDates').addEventListener('click', () => {
+    const r = monthRange();
+    fromDate.value = r.from; toDate.value = r.to;
+    renderDashboard();
+  });
+  fromDate.addEventListener('change', renderDashboard);
+  toDate.addEventListener('change', renderDashboard);
+
+  document.querySelectorAll('.stamp .value').forEach(valEl => {
+    valEl.addEventListener('click', () => {
+      valEl.classList.toggle('masked');
+      const hint = valEl.parentElement.querySelector('.peek-hint');
+      if(hint) hint.classList.toggle('show', valEl.classList.contains('masked'));
+    });
+  });
+
+  function renderReorderAlerts(){
+    const wrap = document.getElementById('reorderAlertWrap');
+    const countEl = document.getElementById('reorderCount');
+    const rows = items.map(it => ({ it, s: stockFor(it.id) }))
+      .filter(r => (r.it.reorderLevel !== null && r.it.reorderLevel !== undefined && r.s.balance <= r.it.reorderLevel) || r.s.balance < 0)
+      .sort((a,b) => a.s.balance - b.s.balance);
+    countEl.textContent = rows.length ? `(${rows.length})` : '';
+    if(!rows.length){
+      wrap.innerHTML = `<div class="empty">No items are at or below their reorder level.</div>`;
+      return;
+    }
+    const trs = rows.map(r => `<tr>
+      <td class="name">${escapeHtml(r.it.name)}</td>
+      <td class="mono" style="color:var(--rust)">${fmt(r.s.balance)}${r.s.balance < 0 ? ' ⚠' : ''}</td>
+      <td class="mono">${(r.it.reorderLevel===null||r.it.reorderLevel===undefined) ? '—' : fmt(r.it.reorderLevel)}</td>
+    </tr>`).join('');
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Item name</th><th>Balance stock</th><th>Reorder level</th></tr></thead>
+      <tbody>${trs}</tbody>
+    </table>`;
+  }
+
+  function renderDashboard(){
+    const from = fromDate.value || '0000-01-01';
+    const to = toDate.value || '9999-12-31';
+    let purchase = 0, sales = 0, gp = 0;
+    for(const t of txs){
+      if(t.date < from || t.date > to) continue;
+      if(t.type === 'Stock In') purchase += t.amount;
+      else { sales += t.amount; gp += t.profit; }
+    }
+    let totalUnits = 0, totalValue = 0;
+    for(const it of items){
+      const s = stockFor(it.id);
+      totalUnits += s.balance;
+      totalValue += s.value;
+    }
+    document.getElementById('statPurchase').textContent = money(purchase);
+    document.getElementById('statSales').textContent = money(sales);
+    document.getElementById('statGP').textContent = money(gp);
+    document.getElementById('statGPWrap').className = 'stamp ' + (gp < 0 ? 'neg' : gp > 0 ? 'pos' : '');
+    document.getElementById('statUnits').textContent = fmt(totalUnits);
+    document.getElementById('statValue').textContent = money(totalValue);
+
+    renderReorderAlerts();
+
+    const wrap = document.getElementById('recentTableWrap');
+    const recent = [...txs].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
+    document.getElementById('recentCount').textContent = txs.length ? `(last ${recent.length} of ${txs.length})` : '';
+    if(!recent.length){
+      wrap.innerHTML = `<div class="empty"><div class="display">This is where the story starts</div>Once you log transactions, the most recent ones will show up here at a glance.</div>`;
+      return;
+    }
+    const rows = recent.map(t => {
+      const it = itemById(t.itemId);
+      return `<tr>
+        <td>${t.date}</td>
+        <td class="name">${it ? escapeHtml(it.name) : '<em>deleted item</em>'}</td>
+        <td><span class="tag ${t.type==='Stock In'?'in':'out'}">${t.type === 'Stock In' ? 'In' : 'Out'}</span></td>
+        <td>${fmt(t.quantity)}</td>
+        <td>${money(t.amount)}</td>
+        <td class="name">${t.party ? escapeHtml(t.party) : '—'}</td>
+      </tr>`;
+    }).join('');
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Amount (₵)</th><th>Supplier / Dept</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ================= EXPORT =================
+  function csvCell(v){
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }
+  function downloadText(filename, text, mime){
+    const blob = new Blob([text], { type: mime || 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function csvMetaLines(){
+    const orgName = 'Bawjiase Primary Hospital';
+    const role = (currentUser && currentUser.role) ? currentUser.role : 'Staff';
+    const now = new Date();
+    return [
+      ['Generated Date:', formatGeneratedDate(now)],
+      [],
+      ['Generated By:'],
+      ['    User Name:', currentUser ? currentUser.username : '—'],
+      ['    Full Name:', currentUser ? currentUser.name : '—'],
+      ['    Role Name:', role],
+      ['    Site Name:', orgName],
+      ['    Organization Name:', orgName],
+      [],
+      ['Filters:'],
+      ['    Site:', orgName],
+      ['    CalendarMonth:', now.toLocaleString('en-US', { month:'long' })],
+      ['    CalendarYear:', String(now.getFullYear())],
+      [],
+      []
+    ];
+  }
+  function exportCsv(filename, header, rows){
+    const lines = [...csvMetaLines(), header, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+    downloadText(filename, lines, 'text/csv');
+  }
+
+  document.getElementById('exportItemsBtn').addEventListener('click', () => {
+    const rows = items.map(it => {
+      const s = stockFor(it.id);
+      return [it.name, it.pppu, it.sppu, s.balance, s.value, it.expiry || '', (it.reorderLevel === null || it.reorderLevel === undefined) ? '' : it.reorderLevel];
+    });
+    exportCsv('items.csv', ['Item Name','Purchase Price/Unit (GHS)','Sale Price/Unit (GHS)','Balance Stock','Stock Value (GHS)','Expiry Date','Reorder Level'], rows);
+  });
+
+  document.getElementById('exportTxBtn').addEventListener('click', () => {
+    const sorted = [...txs].sort((a,b) => a.date.localeCompare(b.date));
+    const rows = sorted.map(t => {
+      const it = itemById(t.itemId);
+      return [t.date, it ? it.name : '(deleted item)', t.type, t.quantity, t.price, t.amount, t.type==='Stock Out'?t.profit:0, t.party || '', t.by || ''];
+    });
+    let totalIn = 0, totalOut = 0, totalBalance = 0, totalValue = 0;
+    items.forEach(it => {
+      const s = stockFor(it.id);
+      totalIn += s.stockIn; totalOut += s.stockOut; totalBalance += s.balance; totalValue += s.value;
+    });
+    rows.push(['', '', '', '', 'Stock In', 'Stock Out', 'Balance Stock', 'Stock Value (GHS)', '']);
+    rows.push(['TOTAL', '', '', '', totalIn, totalOut, totalBalance, totalValue, '']);
+    exportCsv('transactions.csv', ['Date','Item Name','Type','Quantity','Price (GHS)','Amount (GHS)','Profit (GHS)','Supplier / Department','Logged By'], rows);
+  });
+
+  document.getElementById('exportStockBtn').addEventListener('click', () => {
+    const rows = items.map(it => {
+      const s = stockFor(it.id);
+      return [it.name, s.stockIn, s.stockOut, s.balance, s.value];
+    });
+    let totalIn = 0, totalOut = 0, totalBalance = 0, totalValue = 0;
+    items.forEach(it => {
+      const s = stockFor(it.id);
+      totalIn += s.stockIn; totalOut += s.stockOut; totalBalance += s.balance; totalValue += s.value;
+    });
+    rows.push(['TOTAL', totalIn, totalOut, totalBalance, totalValue]);
+    exportCsv('stock.csv', ['Item Name','Stock In','Stock Out','Balance Stock','Stock Value (GHS)'], rows);
+  });
+
+  // ---- shared filters for the alert exports ----
+  function closeToExpiryItems(){
+    const today = new Date(todayStr());
+    return items
+      .map(it => {
+        if(!it.expiry) return null;
+        const daysLeft = Math.round((new Date(it.expiry) - today) / 86400000);
+        if(daysLeft > 90) return null;
+        return { it, s: stockFor(it.id), daysLeft };
+      })
+      .filter(Boolean)
+      .sort((a,b) => a.daysLeft - b.daysLeft);
+  }
+  function belowReorderItems(){
+    return items.map(it => ({ it, s: stockFor(it.id) }))
+      .filter(r => (r.it.reorderLevel !== null && r.it.reorderLevel !== undefined && r.s.balance <= r.it.reorderLevel) || r.s.balance < 0)
+      .sort((a,b) => a.s.balance - b.s.balance);
+  }
+
+  document.getElementById('exportExpiryBtn').addEventListener('click', () => {
+    const rows = closeToExpiryItems().map(({it, s, daysLeft}) => {
+      const status = daysLeft < 0 ? `Expired ${Math.abs(daysLeft)}d ago` : `${daysLeft}d left`;
+      return [it.name, it.expiry, status, s.balance, s.value];
+    });
+    if(!rows.length){ alert('No items are currently close to expiry.'); return; }
+    exportCsv('close-to-expiry.csv', ['Item Name','Expiry Date','Status','Balance Stock','Stock Value (GHS)'], rows);
+  });
+
+  document.getElementById('exportReorderBtn').addEventListener('click', () => {
+    const rows = belowReorderItems().map(({it, s}) => {
+      return [it.name, s.balance, (it.reorderLevel===null||it.reorderLevel===undefined) ? '' : it.reorderLevel, s.value];
+    });
+    if(!rows.length){ alert('No items are currently at or below their reorder level.'); return; }
+    exportCsv('reorder-level.csv', ['Item Name','Balance Stock','Reorder Level','Stock Value (GHS)'], rows);
+  });
+
+  // ================= PDF EXPORT =================
+  function pdfReady(){
+    return !!(window.jspdf && window.jspdf.jsPDF);
+  }
+  function formatGeneratedDate(d){
+    return d.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true }) + ' GMT';
+  }
+  function exportPdf(subtitle, columns, rows, filename, orientation){
+    const helper = document.getElementById('pdfExportHelper');
+    if(!pdfReady()){
+      helper.textContent = 'Still loading the PDF library — wait a moment and try again (needs an internet connection once).';
+      return;
+    }
+    helper.textContent = '';
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: orientation || 'portrait', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    const orgName = 'Bawjiase Primary Hospital';
+    const enterpriseName = 'Ministry Of Health Ghana';
+    const role = (currentUser && currentUser.role) ? currentUser.role : 'Staff';
+    const now = new Date();
+
+    // ---- brand strip ----
+    doc.setFillColor(227,27,35);
+    doc.circle(46, 34, 11, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11);
+    doc.text('H', 46, 37.7, { align:'center' });
+
+    doc.setTextColor(22,58,36);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(13);
+    doc.text(orgName, 64, 31);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(100,100,100);
+    doc.text('Inventory Ledger — ' + subtitle, 64, 43);
+
+    doc.setDrawColor(227,27,35);
+    doc.setLineWidth(1);
+    doc.line(40, 53, pageWidth - 40, 53);
+
+    // ---- generated / filters metadata block ----
+    const labelX = 40, valueX = 165, lineH = 13;
+    let y = 70;
+    function metaLine(label, value, bold){
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(28,42,28);
+      doc.text(label, labelX, y);
+      if(value !== undefined){
+        doc.setFont('helvetica','normal');
+        doc.text(String(value), valueX, y);
+      }
+      y += lineH;
+    }
+    metaLine('Generated Date:', formatGeneratedDate(now));
+    y += 4;
+    metaLine('Generated By:', undefined, true);
+    metaLine('    User Name:', currentUser ? currentUser.username : '—');
+    metaLine('    Full Name:', currentUser ? currentUser.name : '—');
+    metaLine('    Role Name:', role);
+    metaLine('    Site Name:', orgName);
+    metaLine('    Organization Name:', orgName);
+    y += 4;
+    metaLine('Filters:', undefined, true);
+    metaLine('    Site:', orgName);
+    metaLine('    CalendarMonth:', now.toLocaleString('en-US', { month:'long' }));
+    metaLine('    CalendarYear:', String(now.getFullYear()));
+
+    y += 6;
+    doc.setDrawColor(210,210,205);
+    doc.setLineWidth(0.5);
+    doc.line(40, y, pageWidth - 40, y);
+    y += 18;
+
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11.5);
+    doc.setTextColor(22,58,36);
+    doc.text(subtitle, 40, y);
+    y += 10;
+
+    doc.autoTable({
+      head: [columns],
+      body: rows,
+      startY: y,
+      margin: { left: 40, right: 40 },
+      styles: { fontSize: 8.5, cellPadding: 5, textColor: [28,42,28] },
+      headStyles: { fillColor: [22,58,36], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [251,233,198] },
+      didDrawPage: (data) => {
+        const pageCount = doc.internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(140,140,140);
+        doc.text(
+          `Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`,
+          pageWidth - 40, doc.internal.pageSize.getHeight() - 20, { align:'right' }
+        );
+      }
+    });
+    doc.save(filename);
+  }
+
+  document.getElementById('exportItemsPdfBtn').addEventListener('click', () => {
+    const rows = items.map(it => {
+      const s = stockFor(it.id);
+      return [it.name, moneyPdf(it.pppu), moneyPdf(it.sppu), fmt(s.balance), moneyPdf(s.value), it.expiry || '—', (it.reorderLevel===null||it.reorderLevel===undefined) ? '—' : fmt(it.reorderLevel)];
+    });
+    exportPdf('Item master', ['Item Name','Purchase Price/Unit','Sale Price/Unit','Balance Stock','Stock Value','Expiry Date','Reorder Level'], rows, 'items.pdf', 'landscape');
+  });
+
+  document.getElementById('exportTxPdfBtn').addEventListener('click', () => {
+    const sorted = [...txs].sort((a,b) => a.date.localeCompare(b.date));
+    const rows = sorted.map(t => {
+      const it = itemById(t.itemId);
+      return [t.date, it ? it.name : '(deleted item)', t.type === 'Stock In' ? 'In' : 'Out', fmt(t.quantity), moneyPdf(t.price), moneyPdf(t.amount), t.type==='Stock Out' ? moneyPdf(t.profit) : '—', t.party || '—', t.by || '—'];
+    });
+    let totalIn = 0, totalOut = 0, totalBalance = 0, totalValue = 0;
+    items.forEach(it => {
+      const s = stockFor(it.id);
+      totalIn += s.stockIn; totalOut += s.stockOut; totalBalance += s.balance; totalValue += s.value;
+    });
+    rows.push(['', '', '', '', 'Stock In', 'Stock Out', 'Balance Stock', 'Stock Value (GHS)', '']);
+    rows.push(['TOTAL', '', '', '', fmt(totalIn), fmt(totalOut), fmt(totalBalance), moneyPdf(totalValue), '']);
+    exportPdf('Transaction ledger', ['Date','Item','Type','Qty','Price','Amount','Profit','Supplier / Dept','Logged By'], rows, 'transactions.pdf', 'landscape');
+  });
+
+  document.getElementById('exportStockPdfBtn').addEventListener('click', () => {
+    const rows = items.map(it => {
+      const s = stockFor(it.id);
+      return [it.name, fmt(s.stockIn), fmt(s.stockOut), fmt(s.balance), moneyPdf(s.value)];
+    });
+    let totalIn = 0, totalOut = 0, totalBalance = 0, totalValue = 0;
+    items.forEach(it => {
+      const s = stockFor(it.id);
+      totalIn += s.stockIn; totalOut += s.stockOut; totalBalance += s.balance; totalValue += s.value;
+    });
+    rows.push(['TOTAL', fmt(totalIn), fmt(totalOut), fmt(totalBalance), moneyPdf(totalValue)]);
+    exportPdf('Bin cards — stock balances', ['Item Name','Stock In','Stock Out','Balance Stock','Stock Value'], rows, 'stock.pdf', 'portrait');
+  });
+
+  document.getElementById('exportExpiryPdfBtn').addEventListener('click', () => {
+    const list = closeToExpiryItems();
+    if(!list.length){ document.getElementById('pdfExportHelper').textContent = 'No items are currently close to expiry.'; return; }
+    const rows = list.map(({it, s, daysLeft}) => {
+      const status = daysLeft < 0 ? `Expired ${Math.abs(daysLeft)}d ago` : `${daysLeft}d left`;
+      return [it.name, it.expiry, status, fmt(s.balance), moneyPdf(s.value)];
+    });
+    exportPdf('Close to expiry', ['Item Name','Expiry Date','Status','Balance Stock','Stock Value'], rows, 'close-to-expiry.pdf', 'portrait');
+  });
+
+  document.getElementById('exportReorderPdfBtn').addEventListener('click', () => {
+    const list = belowReorderItems();
+    if(!list.length){ document.getElementById('pdfExportHelper').textContent = 'No items are currently at or below their reorder level.'; return; }
+    const rows = list.map(({it, s}) => {
+      return [it.name, fmt(s.balance), (it.reorderLevel===null||it.reorderLevel===undefined) ? '—' : fmt(it.reorderLevel), moneyPdf(s.value)];
+    });
+    exportPdf('Reorder level alerts', ['Item Name','Balance Stock','Reorder Level','Stock Value'], rows, 'reorder-level.pdf', 'portrait');
+  });
+
+  // ================= IMPORT ITEMS =================
+  function parseCsv(text){
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for(let i = 0; i < text.length; i++){
+      const c = text[i], next = text[i+1];
+      if(inQuotes){
+        if(c === '"' && next === '"'){ field += '"'; i++; }
+        else if(c === '"'){ inQuotes = false; }
+        else field += c;
+      } else {
+        if(c === '"') inQuotes = true;
+        else if(c === ','){ row.push(field); field=''; }
+        else if(c === '\r'){ /* skip */ }
+        else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+        else field += c;
+      }
+    }
+    if(field.length || row.length){ row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(c => c.trim() !== ''));
+  }
+
+  document.getElementById('importItemsInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const helper = document.getElementById('importItemsHelper');
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCsv(reader.result);
+        if(rows.length < 2) throw new Error('empty');
+        const header = rows[0].map(h => h.toLowerCase());
+        const nameIdx = header.findIndex(h => h.includes('item') || h.includes('name'));
+        const pppuIdx = header.findIndex(h => h.includes('purchase'));
+        const sppuIdx = header.findIndex(h => h.includes('sale'));
+        const expiryIdx = header.findIndex(h => h.includes('expiry') || h.includes('expiration'));
+        const reorderIdx = header.findIndex(h => h.includes('reorder'));
+        const openingIdx = header.findIndex(h => h.includes('opening'));
+        if(nameIdx === -1 || pppuIdx === -1 || sppuIdx === -1) throw new Error('columns');
+        let added = 0, skipped = 0, stocked = 0;
+        for(const r of rows.slice(1)){
+          const name = (r[nameIdx] || '').trim();
+          const pppu = parseFloat(r[pppuIdx]);
+          const sppu = parseFloat(r[sppuIdx]);
+          if(!name || isNaN(pppu) || isNaN(sppu)){ skipped++; continue; }
+          const expiry = expiryIdx !== -1 ? (r[expiryIdx] || '').trim() : '';
+          const reorderRaw = reorderIdx !== -1 ? parseFloat(r[reorderIdx]) : NaN;
+          const reorderLevel = isNaN(reorderRaw) ? null : reorderRaw;
+          const newItem = { id: uid(), name, pppu, sppu, expiry, reorderLevel };
+          items.push(newItem);
+          added++;
+          const openingRaw = openingIdx !== -1 ? parseFloat(r[openingIdx]) : NaN;
+          if(!isNaN(openingRaw) && openingRaw > 0){
+            txs.push({ id: uid(), date: todayStr(), itemId: newItem.id, type: 'Stock In', quantity: openingRaw, price: pppu, amount: openingRaw * pppu, profit: 0, party: 'Opening Stock', by: currentUser ? currentUser.name : '' });
+            stocked++;
+          }
+        }
+        saveItems(); saveTx();
+        renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
+        helper.style.color = 'var(--teal)';
+        helper.textContent = `Imported ${added} item${added===1?'':'s'}.` + (stocked ? ` Logged opening stock for ${stocked} of them.` : '') + (skipped ? ` Skipped ${skipped} row(s) that were missing a name or valid prices.` : '');
+      } catch(err){
+        helper.style.color = 'var(--rust)';
+        helper.textContent = "Couldn't read that file — make sure it's a CSV with item name, purchase price, and sale price columns.";
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('exportBackupBtn').addEventListener('click', () => {
+    const backup = { version: 1, exportedAt: new Date().toISOString(), items, transactions: txs };
+    downloadText(`bincard-backup-${todayStr()}.json`, JSON.stringify(backup, null, 2), 'application/json');
+  });
+
+  document.getElementById('importBackupInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const helper = document.getElementById('importHelper');
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if(!Array.isArray(data.items) || !Array.isArray(data.transactions)) throw new Error('bad shape');
+        if(!confirm('This replaces everything currently in the app with the backup file. Continue?')){
+          e.target.value = '';
+          return;
+        }
+        items = data.items;
+        txs = data.transactions;
+        saveItems(); saveTx();
+        renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
+        helper.textContent = 'Backup restored.';
+        helper.style.color = 'var(--teal)';
+      } catch(err){
+        helper.textContent = "Couldn't read that file — make sure it's a backup downloaded from this app.";
+        helper.style.color = 'var(--rust)';
+      }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------------- INITIAL PULL FROM SHARED DATABASE ----------------
+  // The app boots instantly from this device's local cache (above), then
+  // quietly refreshes with whatever is on the server so everyone stays in
+  // sync with what other staff have entered on other devices.
+  async function refreshFromDatabase(){
+    if(!db) return;
+    try{
+      const [itemsRes, txRes, usersRes, settingsRes] = await Promise.all([
+        db.from('items').select('*'),
+        db.from('transactions').select('*'),
+        db.from('app_users').select('*'),
+        db.from('app_settings').select('*')
+      ]);
+      if(itemsRes.error || txRes.error || usersRes.error || settingsRes.error){
+        dbWarn('initial load', itemsRes.error || txRes.error || usersRes.error || settingsRes.error);
+        return;
+      }
+
+      items = (itemsRes.data || []).map(r => ({
+        id: r.id, name: r.name, pppu: r.pppu, sppu: r.sppu,
+        expiry: r.expiry || '', reorderLevel: r.reorder_level
+      }));
+      txs = (txRes.data || []).map(r => ({
+        id: r.id, date: r.date, itemId: r.item_id, type: r.type,
+        quantity: r.quantity, price: r.price, amount: r.amount, profit: r.profit,
+        party: r.party || '', by: r.by || ''
+      }));
+      const prevCurrentId = currentUser ? currentUser.id : null;
+      users = (usersRes.data || []).map(r => ({
+        id: r.id, name: r.name, username: r.username, role: r.role || '',
+        isAdmin: !!r.is_admin, passHash: r.pass_hash, createdAt: r.created_at || ''
+      }));
+
+      localStorage.setItem(LS_ITEMS, JSON.stringify(items));
+      localStorage.setItem(LS_TX, JSON.stringify(txs));
+      localStorage.setItem(LS_USERS, JSON.stringify(users));
+
+      (settingsRes.data || []).forEach(row => {
+        if(row.key === LS_PASS_APP || row.key === LS_PASS_ITEMS) localStorage.setItem(row.key, row.value);
+      });
+      const settingKeys = new Set((settingsRes.data || []).map(r => r.key));
+      if(!settingKeys.has(LS_PASS_APP)) localStorage.removeItem(LS_PASS_APP);
+      if(!settingKeys.has(LS_PASS_ITEMS)) localStorage.removeItem(LS_PASS_ITEMS);
+
+      if(prevCurrentId){
+        currentUser = users.find(u => u.id === prevCurrentId) || null;
+        if(!currentUser){
+          localStorage.removeItem(LS_CURRENT_USER);
+          renderUserBadge();
+          setAuthTab(users.length ? 'login' : 'register');
+          showAuthScreen();
+        }
+      }
+
+      renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
+      renderAccountsList(); renderPassStatus(); renderUserBadge();
+      if(currentUser){ if(appPass.hasPass()) showAppLock(); else hideAppLock(); }
+    } catch(e){ dbWarn('initial load', e); }
+  }
+
+  // expose for inline onclick handlers
+  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin };
+
+  // ---------------- initial render ----------------
+  renderItemSelect();
+  renderItemTable();
+  renderTxTable();
+  renderStock();
+  renderDashboard();
+  renderPassStatus();
+  updateFooterDate();
+  setInterval(updateFooterDate, 60 * 1000);
+  resetTxForm();
+  if(currentUser) enforceInitialViewGate();
+  refreshFromDatabase();
+
+  // seed a starter example the very first time, so the app isn't a blank void
+  if(!items.length && !txs.length && !localStorage.getItem('bincard_seeded_v1')){
+    items.push({ id: uid(), name: 'Sample Item — A4 Paper Ream', pppu: 3.50, sppu: 5.00 });
+    localStorage.setItem('bincard_seeded_v1', '1');
+    saveItems();
+    renderItemSelect();
+    renderItemTable();
+    renderStock();
+  }
+})();
+</script>
+</body>
+</html>
