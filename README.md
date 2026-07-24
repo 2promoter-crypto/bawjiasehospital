@@ -48,5 +48,8 @@ vercel --prod # subsequent production deploys
 
 ## Notes
 
+- **Live sync:** once connected to Supabase, the app doesn't just load shared data once — it stays subscribed, so a change made on any device (a new item, a sale, a stock adjustment, an approved account, etc.) is pushed to every other open device automatically, usually within a second, with no manual refresh needed.
+  - If you already ran an older version of `supabase-schema.sql`, re-run the updated version once — it adds the four tables to Supabase's realtime publication (safe to re-run; it skips anything already added).
+- New accounts now need an admin to approve them (Accounts panel) before they can log in — except the named super admin and the very first account created on a fresh database, so there's always someone able to approve others.
 - The Supabase **anon public** key is meant to be visible in client-side code — it is not a secret. Access is controlled by the row-level-security policies in `supabase-schema.sql`, not by hiding the key. Never put your **service_role** key in this file.
 - Each browser also keeps a local cache (`localStorage`) so the app opens instantly and still works offline for a moment before syncing.
