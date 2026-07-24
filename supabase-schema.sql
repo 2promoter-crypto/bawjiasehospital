@@ -58,3 +58,28 @@ create policy "anon full access" on items for all using (true) with check (true)
 create policy "anon full access" on transactions for all using (true) with check (true);
 create policy "anon full access" on app_users for all using (true) with check (true);
 create policy "anon full access" on app_settings for all using (true) with check (true);
+
+-- Realtime: broadcast every insert/update/delete on these tables so every
+-- open device is notified instantly and pulls the change, instead of only
+-- seeing it after a manual refresh. Safe to re-run (skips tables already
+-- added to the publication).
+do $$
+begin
+  alter publication supabase_realtime add table items;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table transactions;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table app_users;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table app_settings;
+exception when duplicate_object then null;
+end $$;
