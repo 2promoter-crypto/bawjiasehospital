@@ -43,10 +43,26 @@ create table if not exists app_settings (
   value text not null
 );
 
--- Row Level Security: the app already protects itself with its own
--- username/password login and its own separate app-open / items-export
--- passwords, so we allow the app's anon key full read/write access here.
--- (Never expose your Supabase "service_role" key in this file — only the
+-- ============================================================
+-- ACCESS CODE  (the database itself enforces this)
+-- ============================================================
+-- 1. Replace CHANGE-THIS-ACCESS-CODE below with your own long, hard-to-guess
+--    code (for example four random words). Keep the single quotes.
+-- 2. Run this whole file. Staff type the same code once per device.
+-- To change the code later: edit it here and run ONLY this function again
+-- (the "create or replace function" statement). Every device will then ask
+-- for the new code.
+-- Never put the code anywhere public — it is only stored inside this function.
+
+create or replace function app_access_ok() returns boolean
+language sql stable as $$
+  select coalesce(current_setting('request.headers', true)::json ->> 'x-access-code', '')
+         = 'CHANGE-THIS-ACCESS-CODE'
+$$;
+
+-- Row Level Security: every request must carry the access code. The app's
+-- own username/password login, approvals and passwords sit on top of this.
+-- (Never expose your Supabase "service_role" key in the app — only the
 -- "anon public" key belongs in the HTML.)
 
 alter table items enable row level security;
@@ -54,32 +70,20 @@ alter table transactions enable row level security;
 alter table app_users enable row level security;
 alter table app_settings enable row level security;
 
-create policy "anon full access" on items for all using (true) with check (true);
-create policy "anon full access" on transactions for all using (true) with check (true);
-create policy "anon full access" on app_users for all using (true) with check (true);
-create policy "anon full access" on app_settings for all using (true) with check (true);
+-- Remove the old open policies (safe to re-run).
+drop policy if exists "anon full access" on items;
+drop policy if exists "anon full access" on transactions;
+drop policy if exists "anon full access" on app_users;
+drop policy if exists "anon full access" on app_settings;
+drop policy if exists "access code required" on items;
+drop policy if exists "access code required" on transactions;
+drop policy if exists "access code required" on app_users;
+drop policy if exists "access code required" on app_settings;
 
--- Realtime: broadcast every insert/update/delete on these tables so every
--- open device is notified instantly and pulls the change, instead of only
--- seeing it after a manual refresh. Safe to re-run (skips tables already
--- added to the publication).
-do $$
-begin
-  alter publication supabase_realtime add table items;
-exception when duplicate_object then null;
-end $$;
-do $$
-begin
-  alter publication supabase_realtime add table transactions;
-exception when duplicate_object then null;
-end $$;
-do $$
-begin
-  alter publication supabase_realtime add table app_users;
-exception when duplicate_object then null;
-end $$;
-do $$
-begin
-  alter publication supabase_realtime add table app_settings;
-exception when duplicate_object then null;
-end $$;
+create policy "access code required" on items for all using (app_access_ok()) with check (app_access_ok());
+create policy "access code required" on transactions for all using (app_access_ok()) with check (app_access_ok());
+create policy "access code required" on app_users for all using (app_access_ok()) with check (app_access_ok());
+create policy "access code required" on app_settings for all using (app_access_ok()) with check (app_access_ok());
+
+-- Live updates are sent as a small "something changed" ping between open
+-- devices (no data inside it), so no realtime table publication is needed.

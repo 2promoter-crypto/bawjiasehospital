@@ -811,9 +811,69 @@
   const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
   const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
-  const db = (SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY' && window.supabase)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+  // ---------------- ACCESS CODE ----------------
+  // The database only answers requests that carry the hospital access code
+  // (checked by the database itself — see app_access_ok() in supabase-schema.sql).
+  // Staff enter the code once per device. Without it the anon key alone
+  // can neither read nor change anything.
+  const dbConfigured = !!(SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY' && window.supabase);
+  const LS_ACCESS = 'bincard_access_code_v1';
+  let db = null;
+  let syncChannel = null;
+
+  function makeClient(code){
+    return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { 'x-access-code': code } } });
+  }
+
+  function askAccessCode(msg){
+    return new Promise(resolve => {
+      const w = document.createElement('div');
+      w.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:var(--ink);padding:20px;';
+      w.innerHTML = '<form style="background:var(--ink-3);padding:28px;border-radius:10px;max-width:340px;width:100%;color:var(--cream);font-family:\'IBM Plex Sans\',sans-serif;"><h2 style="font-family:Oswald,sans-serif;margin:0 0 6px;">Access code</h2><p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Enter the hospital access code to open the ledger.</p><p class="ac-msg" style="color:var(--rust);font-size:13px;margin:0 0 10px;"></p><input type="password" class="ac-in" autocomplete="current-password" style="width:100%;padding:10px;box-sizing:border-box;margin-bottom:12px;" required><button type="submit" style="width:100%;padding:10px;cursor:pointer;">Continue</button></form>';
+      w.querySelector('.ac-msg').textContent = msg || '';
+      document.body.appendChild(w);
+      const inp = w.querySelector('.ac-in'); inp.focus();
+      w.querySelector('form').addEventListener('submit', e => { e.preventDefault(); w.remove(); resolve(inp.value); });
+    });
+  }
+
+  async function checkCode(client){
+    try{
+      const { data, error } = await client.rpc('app_access_ok');
+      if(error && /fetch|network/i.test(error.message || '')) return 'network';
+      return (!error && data === true) ? 'ok' : 'bad';
+    } catch(e){ return 'network'; }
+  }
+
+  async function unlockDatabase(){
+    if(!dbConfigured) return false;     // no database configured: local-only mode
+    let msg = '';
+    for(;;){
+      let code = localStorage.getItem(LS_ACCESS);
+      if(!code){
+        code = await askAccessCode(msg);
+        localStorage.setItem(LS_ACCESS, code);
+      }
+      const client = makeClient(code);
+      const result = await checkCode(client);
+      if(result === 'ok'){ db = client; return true; }
+      if(result === 'bad') localStorage.removeItem(LS_ACCESS);
+      msg = result === 'network' ? 'Could not reach the database. Check your connection and try again.' : 'Incorrect access code.';
+      if(result === 'network') localStorage.removeItem(LS_ACCESS);
+    }
+  }
+
+  // Other devices are nudged with a tiny "something changed" ping (no data in
+  // it); each device then re-reads through the protected tables. A slow
+  // refresh also runs as a safety net.
+  function startLiveSync(){
+    syncChannel = db.channel('bincard-ping').on('broadcast', { event: 'changed' }, scheduleLiveRefresh).subscribe();
+    setInterval(() => { if(!document.hidden) refreshFromDatabase(); }, 30000);
+  }
+  function pingOthers(){
+    if(!syncChannel) return;
+    try{ syncChannel.send({ type: 'broadcast', event: 'changed', payload: {} }); } catch(e){}
+  }
 
   function dbWarn(action, error){ if(error) console.error(`Database ${action} failed — changes were saved on this device only:`, error.message || error); }
 
@@ -840,6 +900,7 @@
         dbWarn(`read (${table})`, selErr);
       }
     } catch(e){ dbWarn(`sync (${table})`, e); }
+    pingOthers();
   }
 
   async function saveSetting(key, value){
@@ -854,6 +915,7 @@
         dbWarn('save (app_settings)', error);
       }
     } catch(e){ dbWarn('sync (app_settings)', e); }
+    pingOthers();
   }
 
   let items = JSON.parse(localStorage.getItem(LS_ITEMS) || "[]");
@@ -2352,6 +2414,9 @@
   // sync with what other staff have entered on other devices.
   async function refreshFromDatabase(){
     if(!db) return;
+    // If the access code was changed on the server, reads would come back
+    // empty — stop here and ask again instead of wiping this device's view.
+    if(await checkCode(db) === 'bad'){ localStorage.removeItem(LS_ACCESS); location.reload(); return; }
     try{
       const [itemsRes, txRes, usersRes, settingsRes] = await Promise.all([
         db.from('items').select('*'),
@@ -2416,14 +2481,7 @@
     clearTimeout(liveRefreshTimer);
     liveRefreshTimer = setTimeout(refreshFromDatabase, 400);
   }
-  if(db){
-    db.channel('bincard-live-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleLiveRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, scheduleLiveRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_users' }, scheduleLiveRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, scheduleLiveRefresh)
-      .subscribe();
-  }
+  // (live sync is started by startLiveSync() once the access code is accepted)
 
   // expose for inline onclick handlers
   window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, approveAccount };
@@ -2439,7 +2497,7 @@
   setInterval(updateFooterDate, 60 * 1000);
   resetTxForm();
   if(currentUser) enforceInitialViewGate();
-  refreshFromDatabase();
+  unlockDatabase().then(ok => { if(ok && db){ startLiveSync(); refreshFromDatabase(); } });
 
   // seed a starter example the very first time, so the app isn't a blank void
   if(!items.length && !txs.length && !localStorage.getItem('bincard_seeded_v1')){
