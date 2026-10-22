@@ -1,55 +1,79 @@
-# Bawjiase Primary Hospital — Inventory Ledger
+# Bawjiase Primary Hospital — Inventory Ledger (shared/hosted version)
 
-A single-page inventory / bin-card app, wired to a shared Supabase (Postgres)
-database so every device sees the same stock, transactions, and accounts.
+This is your inventory app modified so the data (items, transactions, staff
+logins) lives in a real shared database instead of the browser's local
+storage. Deploy it once on Vercel and every computer that opens the link
+sees the same inventory.
 
-## Folder contents
+## What changed from your original file
+
+- `items`, `transactions`, and `users` are now stored in one Postgres row
+  and fetched/saved through a small API (`/api/state.js`), instead of
+  `localStorage`.
+- Everything else — the UI, the login screen, PDF/CSV export, the theme
+  toggle, the app-open password lock — works exactly as before. Those
+  small settings (theme, device password lock, "who's logged in on this
+  browser") intentionally stay local to each device, since they're not
+  shared inventory data.
+- The app polls the database every 20 seconds and refreshes automatically
+  if another device has saved changes, so staff don't have to keep
+  reloading the page.
+- **Known limitation:** if two people save an edit at the exact same
+  moment, the second save is rejected and that device reloads the latest
+  data (you'll see a message). This is a simple "whole document" backend,
+  not row-level locking — fine for a small hospital's day-to-day use, but
+  worth knowing about.
+
+## Deploy steps
+
+1. **Push this folder to a GitHub repo** (or use the Vercel CLI to deploy
+   the folder directly — `npx vercel` from inside it).
+
+2. **Import the repo into Vercel** (vercel.com → Add New → Project).
+   No build settings are needed — it's a static `index.html` plus one
+   serverless function in `/api`.
+
+3. **Add a Postgres database:** in your Vercel project, go to
+   **Storage → Create Database**, and choose a Postgres provider (Neon is
+   the default free option). This automatically sets a `DATABASE_URL`
+   (or `POSTGRES_URL`) environment variable on your project — you don't
+   need to copy/paste any connection string yourself.
+
+3b. **Set the access code:** Settings → Environment Variables → add `ACCESS_CODE` with a long, hard-to-guess code (e.g. 4+ random words) for Production. Without it the API refuses every request. Staff enter it once per device.
+
+4. **Redeploy** (Vercel will prompt you to redeploy after linking the
+   database, so the new environment variable is picked up).
+
+5. Open your `*.vercel.app` URL. The first person to open it registers
+   the first account, which automatically becomes the owner/admin
+   account — same as before. The database table is created automatically
+   on first request (`ensureTable()` in `/api/state.js`), so there's no
+   manual SQL step.
+
+## Local testing (optional)
 
 ```
-index.html            the entire app (HTML + CSS + JS)
-supabase-schema.sql    run this once in your Supabase project
-vercel.json            static-hosting config for Vercel
+npm install
+npx vercel dev
 ```
 
-Vercel serves `index.html` automatically as the site's home page — no build
-step, no framework, nothing else required.
+`vercel dev` runs the static file and the `/api` function together and
+will ask you to link the same Postgres database (or create one) for your
+local environment.
 
-## 1. Set up the database (one-time)
+## Files
 
-1. Create a free project at https://supabase.com.
-2. Open **SQL Editor → New query**, paste the contents of `supabase-schema.sql`, and run it.
-3. Go to **Project Settings → API** and copy:
-   - **Project URL**
-   - **anon public** key
-4. Open `index.html`, find these two lines near the top of the `<script>` block, and paste your values in:
-   ```js
-   const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
-   const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-   ```
+- `index.html` — the app (frontend). Only the data-loading/saving code
+  near the top and bottom of the `<script>` block changed.
+- `api/state.js` — the serverless function. `GET` returns the current
+  data; `POST` saves it (with a version check to catch simultaneous
+  edits).
+- `package.json` — declares the one dependency (`@neondatabase/serverless`)
+  used to talk to Postgres.
 
-If you skip this step, the app still works — it just falls back to storing
-data only in the current browser, same as before.
+## Account approval
 
-## 2. Deploy to Vercel
-
-**Option A — Vercel dashboard (no command line):**
-1. Put this folder in a GitHub/GitLab/Bitbucket repo (or use "drag and drop" deploy at https://vercel.com/new).
-2. Import the repo in Vercel, or drag the folder onto the new-project page.
-3. Framework preset: **Other** / static — Vercel will detect `index.html` automatically.
-4. Deploy.
-
-**Option B — Vercel CLI:**
-```bash
-npm install -g vercel
-cd this-folder
-vercel        # first deploy, follow the prompts
-vercel --prod # subsequent production deploys
-```
-
-## Notes
-
-- **Live sync:** once connected to Supabase, the app doesn't just load shared data once — it stays subscribed, so a change made on any device (a new item, a sale, a stock adjustment, an approved account, etc.) is pushed to every other open device automatically, usually within a second, with no manual refresh needed.
-  - If you already ran an older version of `supabase-schema.sql`, re-run the updated version once — it adds the four tables to Supabase's realtime publication (safe to re-run; it skips anything already added).
-- New accounts now need an admin to approve them (Accounts panel) before they can log in — except the named super admin and the very first account created on a fresh database, so there's always someone able to approve others.
-- The Supabase **anon public** key is meant to be visible in client-side code — it is not a secret. Access is controlled by the row-level-security policies in `supabase-schema.sql`, not by hiding the key. Never put your **service_role** key in this file.
-- Each browser also keeps a local cache (`localStorage`) so the app opens instantly and still works offline for a moment before syncing.
+New accounts are created as "awaiting approval" and cannot log in until an
+admin approves them (Password tab → Accounts → Approve). The first account,
+and the owner username, are approved automatically. Admins can also revoke
+access later; the person is signed out the next time their screen syncs.

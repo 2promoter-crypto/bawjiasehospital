@@ -1,0 +1,9 @@
+{
+  "name": "bawjiase-hospital-inventory",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bawjiase Primary Hospital inventory ledger — static frontend + Vercel serverless API backed by Postgres.",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}

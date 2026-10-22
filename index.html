@@ -8,7 +8,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
   :root{
     --ink:#0e2417;
@@ -321,10 +320,10 @@
   }
   .user-badge .user-name{font-size:12px; color:var(--cream); font-family:'IBM Plex Sans',sans-serif; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .user-badge button{
-    background:none; border:none; color:var(--muted); cursor:pointer; font-size:11px;
-    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.04em; padding:0 2px;
+    background:transparent; border:1px solid var(--rust); color:var(--rust); cursor:pointer; font-size:11px;
+    font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:.06em; padding:4px 10px; border-radius:14px; flex-shrink:0;
   }
-  .user-badge button:hover{color:var(--rust);}
+  .user-badge button:hover{background:var(--rust); color:var(--cream);}
 
   /* ---------- accounts list (security view) ---------- */
   .account-row{
@@ -356,6 +355,7 @@
   @media (max-width:640px){
     header{padding:14px 16px;}
     nav button{padding:8px 10px; font-size:11px;}
+    .user-badge .user-name{display:none;}
     main{padding:20px 12px 60px;}
   }
 </style>
@@ -451,12 +451,13 @@
     <button data-view="items">Items</button>
     <button data-view="search">Search</button>
     <button data-view="export">Export</button>
+    <button data-view="activity">Activity</button>
     <button data-view="security">Password</button>
   </nav>
   <div class="user-badge" id="currentUserBadge" style="display:none;">
     <div class="avatar" id="currentUserAvatar"></div>
     <span class="user-name" id="currentUserName"></span>
-    <button type="button" id="logoutBtn" title="Log out">Log out</button>
+    <button type="button" id="logoutBtn" title="Log out of this account" aria-label="Log out">⎋ Log out</button>
   </div>
   <button class="theme-toggle" id="themeToggle" title="Toggle light/dark" aria-label="Toggle theme">☾</button>
 </header>
@@ -632,6 +633,25 @@
     </section>
   </div>
 
+  <!-- ACTIVITY (admins only) -->
+  <div class="view" id="view-activity">
+    <section class="panel">
+      <h2>User activity <span class="count" id="activityCount"></span></h2>
+      <div class="filter-row">
+        <div class="field">
+          <label for="activityUser">User</label>
+          <select id="activityUser"><option value="">All users</option></select>
+        </div>
+        <div class="field" style="flex:1 1 240px;">
+          <label for="activitySearch">Search</label>
+          <input type="text" id="activitySearch" placeholder="e.g. login, Paracetamol, deleted">
+        </div>
+      </div>
+      <div class="helper">Newest first. Shows the latest 2,000 actions: sign-ins, item and transaction changes, and account approvals.</div>
+      <div class="table-wrap" id="activityWrap"></div>
+    </section>
+  </div>
+
   <!-- SEARCH -->
   <div class="view" id="view-search">
     <section class="panel">
@@ -787,94 +807,118 @@
 </div>
 
 <script>
-(function(){
+(async function(){
   "use strict";
 
-  const LS_ITEMS = "bincard_items_v1";
-  const LS_TX = "bincard_tx_v1";
   const LS_THEME = "bincard_theme_v1";
 
-  // ---------------- SHARED DATABASE (Supabase) ----------------
-  // This lets every device/staff member see the same items, stock, transactions
-  // and accounts instead of each browser having its own private copy.
-  //
-  // Setup (one-time):
-  //   1. Create a free project at https://supabase.com
-  //   2. Open the SQL editor and run the schema from supabase-schema.sql
-  //      (provided alongside this file).
-  //   3. Project Settings -> API -> copy the "Project URL" and the
-  //      "anon public" key into the two constants below.
-  //   4. Deploy this file to Vercel as normal — no server code needed.
-  //
-  // Until both values below are filled in, the app quietly falls back to
-  // this browser's local storage only (same behaviour as before).
-  const SUPABASE_URL = 'YOUR_SUPABASE_PROJECT_URL';
-  const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+  // ---------------- SHARED BACKEND STATE ----------------
+  // items / transactions / users now live in a shared Postgres database
+  // (via /api/state) instead of this browser's local storage, so every
+  // device sees the same inventory. See README.md for setup.
+  let items = [];
+  let txs = [];
+  let activity = []; // shared audit trail of what each user did
+  let stateVersion = 0;
+  let stateLoaded = false;
+  let saveQueued = false;
+  let saveInFlight = false;
 
-  const db = (SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY && SUPABASE_ANON_KEY !== 'YOUR_SUPABASE_ANON_KEY' && window.supabase)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+  // Server-enforced access code: every /api/state call carries it; the server rejects
+  // anything without the right code, so the data is not readable by outsiders.
+  const LS_ACCESS = 'bincard_access_code_v1';
+  function apiFetch(url, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { 'x-access-code': localStorage.getItem(LS_ACCESS) || '' });
+    return fetch(url, opts);
+  }
+  function askAccessCode(msg){
+    return new Promise(resolve => {
+      const w = document.createElement('div');
+      w.style.cssText = 'position:fixed;inset:0;z-index:1001;display:flex;align-items:center;justify-content:center;background:var(--ink);padding:20px;';
+      w.innerHTML = '<form style="background:var(--ink-3);padding:28px;border-radius:10px;max-width:340px;width:100%;color:var(--cream);font-family:\'IBM Plex Sans\',sans-serif;"><h2 style="font-family:Oswald,sans-serif;margin:0 0 6px;">Access code</h2><p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Enter the hospital access code to open the ledger.</p><p class="ac-msg" style="color:var(--rust);font-size:13px;margin:0 0 10px;"></p><input type="password" class="ac-in" autocomplete="current-password" style="width:100%;padding:10px;box-sizing:border-box;margin-bottom:12px;" required><button type="submit" style="width:100%;padding:10px;cursor:pointer;">Continue</button></form>';
+      w.querySelector('.ac-msg').textContent = msg || '';
+      document.body.appendChild(w);
+      const inp = w.querySelector('.ac-in'); inp.focus();
+      w.querySelector('form').addEventListener('submit', e => {
+        e.preventDefault();
+        localStorage.setItem(LS_ACCESS, inp.value);
+        w.remove(); resolve();
+      });
+    });
+  }
+  function accessDenied(){ localStorage.removeItem(LS_ACCESS); location.reload(); }
 
-  function dbWarn(action, error){ if(error) console.error(`Database ${action} failed — changes were saved on this device only:`, error.message || error); }
+  async function loadState(){
+    let res, msg = '';
+    for(;;){
+      if(!localStorage.getItem(LS_ACCESS)) await askAccessCode(msg);
+      res = await apiFetch('/api/state');
+      if(res.status === 401){ localStorage.removeItem(LS_ACCESS); msg = 'Incorrect access code.'; continue; }
+      break;
+    }
+    if(!res.ok) throw new Error('Failed to load shared data (' + res.status + ')');
+    const data = await res.json();
+    items = data.items || [];
+    txs = data.transactions || [];
+    users = data.users || []; activity = data.activity || [];
+    stateVersion = data.version || 0;
+    stateLoaded = true;
+  }
 
-  // Push the full current array for a table to Supabase: upsert everything
-  // present locally, then delete anything on the server no longer present
-  // locally (covers row deletion, since the app keeps whole arrays in memory).
-  async function syncTable(table, rows, mapOut){
-    if(!db) return;
-    try{
-      const payload = rows.map(mapOut);
-      if(payload.length){
-        const { error } = await db.from(table).upsert(payload, { onConflict: 'id' });
-        dbWarn(`save (${table})`, error);
+  function rerenderEverything(){
+    if(typeof currentUser !== 'undefined' && currentUser){
+      const fresh = users.find(x => x.id === currentUser.id);
+      if(!fresh || fresh.approved === false){ localStorage.removeItem('bincard_current_user_v1'); location.reload(); return; }
+      currentUser = fresh;
+    }
+    renderItemSelect(); renderItemTable(); renderTxTable(); renderStock();
+    renderDashboard(); renderAccountsList(); renderPassStatus(); renderActivity();
+  }
+
+  async function flushSave(){
+    if(saveInFlight) return;
+    saveInFlight = true;
+    saveQueued = false;
+    try {
+      const res = await apiFetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, transactions: txs, users, activity, version: stateVersion })
+      });
+      if(res.status === 401){ accessDenied(); return; }
+      const data = await res.json();
+      if(res.status === 409 && data.conflict){
+        alert('Someone else on another device saved changes at the same time. Reloading the latest shared data — please redo your last edit if it did not land.');
+        items = data.items || []; txs = data.transactions || []; users = data.users || []; activity = data.activity || [];
+        stateVersion = data.version || 0;
+        rerenderEverything();
+      } else if(res.ok){
+        stateVersion = data.version;
       }
-      const { data: existing, error: selErr } = await db.from(table).select('id');
-      if(!selErr && existing){
-        const keep = new Set(rows.map(r => r.id));
-        const toDelete = existing.map(r => r.id).filter(id => !keep.has(id));
-        if(toDelete.length){
-          const { error: delErr } = await db.from(table).delete().in('id', toDelete);
-          dbWarn(`delete (${table})`, delErr);
-        }
-      } else if(selErr){
-        dbWarn(`read (${table})`, selErr);
-      }
-    } catch(e){ dbWarn(`sync (${table})`, e); }
+    } catch(err){
+      console.error('Save failed', err);
+    } finally {
+      saveInFlight = false;
+      if(saveQueued) flushSave();
+    }
   }
 
-  async function saveSetting(key, value){
-    if(value === null || value === undefined){ localStorage.removeItem(key); } else { localStorage.setItem(key, value); }
-    if(!db) return;
-    try{
-      if(value === null || value === undefined){
-        const { error } = await db.from('app_settings').delete().eq('key', key);
-        dbWarn('delete (app_settings)', error);
-      } else {
-        const { error } = await db.from('app_settings').upsert({ key, value }, { onConflict: 'key' });
-        dbWarn('save (app_settings)', error);
-      }
-    } catch(e){ dbWarn('sync (app_settings)', e); }
+  function scheduleSave(){
+    if(!stateLoaded) return; // don't push a save before initial load completes
+    saveQueued = true;
+    flushSave();
   }
 
-  let items = JSON.parse(localStorage.getItem(LS_ITEMS) || "[]");
-  let txs = JSON.parse(localStorage.getItem(LS_TX) || "[]");
+  function logActivity(action, detail, who){
+    const w = who || (typeof currentUser !== 'undefined' ? currentUser : null);
+    activity.push({ id: uid(), ts: new Date().toISOString(), userId: w ? w.id : '', name: w ? w.name : '(not signed in)', username: w ? w.username : '', action, detail: detail || '' });
+    if(activity.length > 2000) activity = activity.slice(-2000);
+    scheduleSave();
+  }
 
-  function saveItems(){
-    localStorage.setItem(LS_ITEMS, JSON.stringify(items));
-    syncTable('items', items, it => ({
-      id: it.id, name: it.name, pppu: it.pppu, sppu: it.sppu,
-      expiry: it.expiry || null,
-      reorder_level: (it.reorderLevel === null || it.reorderLevel === undefined) ? null : it.reorderLevel
-    }));
-  }
-  function saveTx(){
-    localStorage.setItem(LS_TX, JSON.stringify(txs));
-    syncTable('transactions', txs, t => ({
-      id: t.id, date: t.date, item_id: t.itemId, type: t.type,
-      quantity: t.quantity, price: t.price, amount: t.amount, profit: t.profit || 0,
-      party: t.party || null, by: t.by || null
-    }));
-  }
+  function saveItems(){ scheduleSave(); }
+  function saveTx(){ scheduleSave(); }
   function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
   function fmt(n){ return (Math.round((n + Number.EPSILON) * 100) / 100).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function money(n){ return '₵' + fmt(n); }
@@ -987,7 +1031,7 @@
         helper.textContent = "New password and confirmation don't match.";
         return;
       }
-      await saveSetting(cfg.storageKey, await sha256Hex(next));
+      localStorage.setItem(cfg.storageKey, await sha256Hex(next));
       form.reset();
       helper.style.color = 'var(--teal)';
       helper.textContent = 'Password saved.';
@@ -1001,7 +1045,7 @@
         helper.textContent = 'Enter your current password to remove it.';
         return;
       }
-      await saveSetting(cfg.storageKey, null);
+      localStorage.removeItem(cfg.storageKey);
       form.reset();
       helper.style.color = 'var(--teal)';
       helper.textContent = 'Password removed.';
@@ -1069,19 +1113,16 @@
   });
 
   // ---------------- ACCOUNTS / LOGIN ----------------
-  const LS_USERS = "bincard_users_v1";
   const LS_CURRENT_USER = "bincard_current_user_v1";
 
-  let users = JSON.parse(localStorage.getItem(LS_USERS) || "[]");
+  // `users` is populated from the shared backend by loadState(); declared
+  // here (rather than with items/txs above) so it's ready before the auth
+  // code below references it. `currentUser` is which of those accounts is
+  // signed in on THIS device, which stays local on purpose.
+  let users = [];
   let currentUser = null;
 
-  function saveUsers(){
-    localStorage.setItem(LS_USERS, JSON.stringify(users));
-    syncTable('app_users', users, u => ({
-      id: u.id, name: u.name, username: u.username, role: u.role || null,
-      is_admin: !!u.isAdmin, pass_hash: u.passHash, created_at: u.createdAt || null
-    }));
-  }
+  function saveUsers(){ scheduleSave(); }
   function normalizeUsername(u){ return (u || '').trim().toLowerCase(); }
   // This account (Frederick Addae-Mintah) is the permanent super admin. It always has
   // admin rights, can never be removed or demoted, and is the ONLY account that can
@@ -1097,6 +1138,14 @@
   function isAdminUser(u){
     u = u || currentUser;
     return !!(u && (isSuperAdminUser(u) || u.isAdmin));
+  }
+  // New accounts must be approved by an admin before they can use the app.
+  // Accounts created before this feature (no flag) count as approved.
+  function isApproved(u){ return !!u && u.approved !== false; }
+  function pendingCount(){ return users.filter(u => !isApproved(u)).length; }
+  function notifyPending(){
+    const n = pendingCount();
+    if(n && isAdminUser()) setTimeout(() => alert(n + ' new account' + (n===1?' is':'s are') + ' waiting for your approval. Open the Password tab \u2192 Accounts to approve.'), 300);
   }
   function findUserByUsername(u){
     const key = normalizeUsername(u);
@@ -1140,11 +1189,46 @@
 
   function renderUserBadge(){
     const badge = document.getElementById('currentUserBadge');
-    if(!currentUser){ badge.style.display = 'none'; return; }
+    if(!currentUser){ badge.style.display = 'none'; applyRoleNav(); return; }
     badge.style.display = 'flex';
     document.getElementById('currentUserAvatar').textContent = initials(currentUser.name);
     document.getElementById('currentUserName').textContent = currentUser.name;
+    applyRoleNav();
   }
+
+  // Non-admin users only get Dashboard, Stock and Search. Everything else
+  // (Transactions, Items, Export, Password) is admin-only.
+  const NON_ADMIN_VIEWS = ['dashboard', 'stock', 'search'];
+  function allowedView(v){ return isAdminUser() || NON_ADMIN_VIEWS.includes(v); }
+  function applyRoleNav(){
+    document.querySelectorAll('nav button').forEach(b => { b.style.display = allowedView(b.dataset.view) ? '' : 'none'; });
+    const active = document.querySelector('.view.active');
+    if(active && !allowedView(active.id.replace('view-', ''))) switchToView('dashboard');
+  }
+
+  function renderActivity(){
+    const wrap = document.getElementById('activityWrap');
+    if(!wrap || !isAdminUser()) return;
+    const userSel = document.getElementById('activityUser');
+    const chosen = userSel.value;
+    const names = [...new Set(activity.map(a => a.name))].sort((a,b) => a.localeCompare(b));
+    userSel.innerHTML = '<option value="">All users</option>' + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    userSel.value = names.includes(chosen) ? chosen : '';
+    const q = (document.getElementById('activitySearch').value || '').trim().toLowerCase();
+    let rows = activity.slice().reverse();
+    if(userSel.value) rows = rows.filter(a => a.name === userSel.value);
+    if(q) rows = rows.filter(a => (a.action + ' ' + a.detail + ' ' + a.name + ' ' + a.username).toLowerCase().includes(q));
+    document.getElementById('activityCount').textContent = rows.length ? '(' + rows.length + ')' : '';
+    if(!rows.length){
+      wrap.innerHTML = '<div class="empty">No activity recorded yet.</div>';
+      return;
+    }
+    wrap.innerHTML = `<table><thead><tr><th>When</th><th>User</th><th>Action</th><th>Details</th></tr></thead><tbody>${
+      rows.slice(0, 500).map(a => `<tr><td class="mono">${escapeHtml(new Date(a.ts).toLocaleString())}</td><td>${escapeHtml(a.name)}${a.username ? ' <span class="helper" style="display:inline;margin:0;">@' + escapeHtml(a.username) + '</span>' : ''}</td><td>${escapeHtml(a.action)}</td><td>${escapeHtml(a.detail)}</td></tr>`).join('')
+    }</tbody></table>`;
+  }
+  document.getElementById('activityUser').addEventListener('change', renderActivity);
+  document.getElementById('activitySearch').addEventListener('input', renderActivity);
 
   function renderAccountsList(){
     const wrap = document.getElementById('accountsListWrap');
@@ -1163,24 +1247,68 @@
       const admin = isAdminUser(u);
       const adminBadge = superAdmin
         ? ' · <span style="color:var(--amber);">Admin (owner)</span>'
-        : (admin ? ' · <span style="color:var(--amber);">Admin</span>' : '');
+        : (admin ? ' · <span style="color:var(--amber);">Admin</span>' : ' · <span style="color:var(--muted);">Non-admin</span>');
       let adminBtn = '';
       if(iAmSuperAdmin && !superAdmin){
         adminBtn = admin
           ? `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Remove admin</button>`
           : `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Make admin</button>`;
       }
+      const approved = isApproved(u);
+      const pendingBadge = approved ? '' : ' · <span style="color:var(--rust);">Awaiting approval</span>';
+      let accessBtn = '';
+      if(!superAdmin){
+        accessBtn = approved
+          ? `<button type="button" class="btn ghost small" onclick="BinCard.toggleApproval('${u.id}')">Revoke access</button>`
+          : `<button type="button" class="btn small" onclick="BinCard.approveUser('${u.id}', false)">Approve as non-admin</button>`
+            + (iAmSuperAdmin ? `<button type="button" class="btn small" onclick="BinCard.approveUser('${u.id}', true)">Approve as admin</button>` : '');
+      }
       const removeBtn = (users.length > 1 && !superAdmin) ? `<button type="button" class="btn small danger" onclick="BinCard.deleteAccount('${u.id}')">Remove</button>` : '';
       return `
       <div class="account-row">
         <div>
           <div class="name">${escapeHtml(u.name)}${currentUser && currentUser.id === u.id ? ' <span class="helper" style="display:inline;margin:0;">(you)</span>' : ''}</div>
-          <div class="helper" style="margin:2px 0 0;">@${escapeHtml(u.username)}${u.role ? ' · ' + escapeHtml(u.role) : ''}${adminBadge}</div>
+          <div class="helper" style="margin:2px 0 0;">@${escapeHtml(u.username)}${u.role ? ' · ' + escapeHtml(u.role) : ''}${adminBadge}${pendingBadge}</div>
         </div>
-        <div style="display:flex; gap:8px;">${adminBtn}${removeBtn}</div>
+        <div style="display:flex; gap:8px;">${accessBtn}${adminBtn}${removeBtn}</div>
       </div>
     `;
     }).join('');
+  }
+
+  // Give a waiting account access and choose its type. Only the owner can approve as admin.
+  function approveUser(id, asAdmin){
+    if(!isAdminUser()){ alert('Only an admin can approve accounts.'); return; }
+    if(asAdmin && !isSuperAdminUser()){ alert('Only the owner can approve an account as admin.'); return; }
+    const u = users.find(x => x.id === id);
+    if(!u || isApproved(u)) return;
+    if(!confirm('Approve ' + u.name + ' as ' + (asAdmin ? 'an ADMIN (full access)' : 'a non-admin (Dashboard, Stock and Search only)') + '?')) return;
+    u.approved = true;
+    u.isAdmin = !!asAdmin;
+    logActivity('Approved account', u.name + ' (@' + u.username + ') as ' + (asAdmin ? 'admin' : 'non-admin'));
+    saveUsers();
+    renderAccountsList();
+  }
+
+  function toggleApproval(id){
+    if(!isAdminUser()){ alert('Only an admin can approve or revoke access.'); return; }
+    const u = users.find(x => x.id === id);
+    if(!u || isSuperAdminUser(u)) return;
+    if(isApproved(u) && (u.id === (currentUser && currentUser.id) || (isAdminUser(u) && !isSuperAdminUser()))){
+      alert(u.id === currentUser.id ? "You can't revoke your own access." : 'Only the owner can revoke an admin account.');
+      return;
+    }
+    if(isApproved(u)){
+      if(!confirm('Revoke access for ' + u.name + '? They will be signed out and unable to log in until approved again.')) return;
+      u.approved = false;
+      u.isAdmin = false;
+      logActivity('Revoked access', u.name + ' (@' + u.username + ')');
+    } else {
+      u.approved = true;
+      logActivity('Approved account', u.name + ' (@' + u.username + ')');
+    }
+    saveUsers();
+    renderAccountsList();
   }
 
   function toggleAdmin(id){
@@ -1189,6 +1317,7 @@
     if(!u) return;
     if(isSuperAdminUser(u)) return; // owner's admin status can't be changed
     u.isAdmin = !u.isAdmin;
+    logActivity(u.isAdmin ? 'Made admin' : 'Removed admin rights', u.name + ' (@' + u.username + ')');
     saveUsers();
     renderAccountsList();
   }
@@ -1199,16 +1328,26 @@
     hideAuthScreen();
     renderUserBadge();
     renderAccountsList();
+    logActivity('Logged in', '', user);
     if(appPass.hasPass()) showAppLock(); else hideAppLock();
     enforceInitialViewGate();
+    notifyPending();
   }
 
   async function tryLogin(){
+    loginError.style.color = '';
     loginError.textContent = '';
     const user = findUserByUsername(loginUsername.value);
     if(!user){ loginError.textContent = 'No account with that username.'; return; }
     const hash = await sha256Hex(loginPassword.value);
+    if(hash === user.passHash && !isApproved(user)){
+      logActivity('Login blocked (not yet approved)', '@' + user.username, user);
+      loginError.textContent = 'Your account is awaiting approval by an administrator. Please try again later.';
+      loginPassword.value = '';
+      return;
+    }
     if(hash !== user.passHash){
+      logActivity('Failed login (wrong password)', '@' + user.username, user);
       loginError.textContent = 'Incorrect password.';
       loginPassword.value = '';
       loginPassword.focus();
@@ -1229,10 +1368,19 @@
     if(findUserByUsername(uname)){ registerError.textContent = 'That username is already taken.'; return; }
     if(pass.length < 4){ registerError.textContent = 'Password must be at least 4 characters.'; return; }
     if(pass !== confirm){ registerError.textContent = "Password and confirmation don't match."; return; }
-    const user = { id: uid(), name, username: uname, role: regRole.value, isAdmin: false, passHash: await sha256Hex(pass), createdAt: todayStr() };
+    const autoApprove = users.length === 0 || uname === ADMIN_USERNAME;
+    const user = { id: uid(), name, username: uname, role: regRole.value, isAdmin: false, approved: autoApprove, passHash: await sha256Hex(pass), createdAt: todayStr() };
     users.push(user);
     saveUsers();
     regName.value = ''; regUsername.value = ''; regPassword.value = ''; regConfirm.value = '';
+    if(!autoApprove){
+      logActivity('Created account (awaiting approval)', name + ' @' + uname, user);
+      setAuthTab('login');
+      loginUsername.value = uname;
+      loginError.style.color = 'var(--teal)';
+      loginError.textContent = 'Account created. An administrator must approve it before you can log in.';
+      return;
+    }
     completeLogin(user);
   }
 
@@ -1241,6 +1389,7 @@
 
   document.getElementById('logoutBtn').addEventListener('click', () => {
     if(!confirm('Log out of this account?')) return;
+    logActivity('Logged out');
     currentUser = null;
     localStorage.removeItem(LS_CURRENT_USER);
     renderUserBadge();
@@ -1266,6 +1415,7 @@
     if(!u) return;
     if(isSuperAdminUser(u)){ alert("Frederick Addae-Mintah's account is the owner account and can't be removed."); return; }
     if(!confirm(`Remove the account "${u.name}"? This only removes their login — it doesn't touch any inventory data.`)) return;
+    logActivity('Removed account', u.name + ' (@' + u.username + ')');
     users = users.filter(x => x.id !== id);
     saveUsers();
     if(currentUser && currentUser.id === id){
@@ -1279,9 +1429,11 @@
   }
 
   // Boot: figure out whether someone is already logged in on this device.
-  (function bootAuth(){
+  // Runs after loadState() has fetched the shared user list — called near
+  // the bottom of this script, not immediately here.
+  function bootAuth(){
     const savedId = localStorage.getItem(LS_CURRENT_USER);
-    currentUser = savedId ? (users.find(u => u.id === savedId) || null) : null;
+    currentUser = savedId ? (users.find(u => u.id === savedId && isApproved(u)) || null) : null;
     if(currentUser){
       hideAuthScreen();
       renderUserBadge();
@@ -1293,7 +1445,7 @@
       showAuthScreen();
       setTimeout(() => (users.length ? loginUsername : regName).focus(), 50);
     }
-  })();
+  }
 
   const passModalOverlay = document.getElementById('passModalOverlay');
   const passModalInput = document.getElementById('passModalInput');
@@ -1335,6 +1487,7 @@
   const navButtons = document.querySelectorAll('nav button');
 
   function switchToView(view){
+    if(!allowedView(view)) view = 'dashboard';
     navButtons.forEach(b => b.classList.toggle('active', b.dataset.view === view));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + view).classList.add('active');
@@ -1344,6 +1497,7 @@
     if(view === 'dashboard') renderDashboard();
     if(view === 'security') renderPassStatus();
     if(view === 'search') renderSearch();
+    if(view === 'activity') renderActivity();
   }
 
   // If Dashboard is password-protected, never let it sit visible as the
@@ -1403,6 +1557,7 @@
     } else {
       items.push({ id: uid(), name, pppu, sppu, expiry, reorderLevel });
     }
+    logActivity(itemEditId.value ? 'Edited item' : 'Added item', name + ' (buy ₵' + pppu + ', sell ₵' + sppu + ')');
     saveItems();
     resetItemForm();
     renderItemTable();
@@ -1414,6 +1569,7 @@
   itemCancelEdit.addEventListener('click', resetItemForm);
 
   function editItem(id){
+    if(!isAdminUser()) return;
     const it = itemById(id);
     if(!it) return;
     itemEditId.value = it.id;
@@ -1429,12 +1585,15 @@
   }
 
   function deleteItem(id){
+    if(!isAdminUser()) return;
     const inUse = txs.some(t => t.itemId === id);
     if(inUse){
       alert("This item has transactions logged against it. Delete those first, or keep the item on file.");
       return;
     }
     if(!confirm('Remove this item from the item master?')) return;
+    const gone = itemById(id);
+    logActivity('Deleted item', gone ? gone.name : id);
     items = items.filter(i => i.id !== id);
     saveItems();
     renderItemTable();
@@ -1448,10 +1607,14 @@
       wrap.innerHTML = `<div class="empty"><div class="display">No items on file yet</div>Add your first item above — name it, price it, and it'll show up here and in the transaction form.</div>`;
       return;
     }
+    const mv = movementMap();
     let rows = items.map(it => {
       const st = stockFor(it.id);
       const low = it.reorderLevel !== null && it.reorderLevel !== undefined && st.balance <= it.reorderLevel;
       const exp = expiryInfo(it.expiry);
+      const m = mv[it.id];
+      const mvCell = !m ? '<span class="mono" style="color:var(--muted)">—</span>'
+        : `<span class="mono" title="${fmt(m.out)} unit(s) issued in the last ${MOVE_DAYS} days" style="font-weight:600;color:${m.cls==='Fast'?'var(--teal)':'var(--rust)'}">${m.cls==='Fast'?'▲ Fast':'▼ Slow'}</span><div class="mono" style="font-size:11px;color:var(--muted)">${fmt(m.out)} out / ${MOVE_DAYS}d</div>`;
       return `<tr>
         <td class="name">${escapeHtml(it.name)}</td>
         <td>${money(it.pppu)}</td>
@@ -1459,6 +1622,7 @@
         <td class="mono" style="${st.balance<0?'color:var(--rust)':''}">${fmt(st.balance)}</td>
         <td class="mono" style="${low?'color:var(--rust)':''}">${(it.reorderLevel === null || it.reorderLevel === undefined) ? '—' : fmt(it.reorderLevel)}${low ? ' ⚠' : ''}</td>
         <td class="mono" style="${exp.color?`color:${exp.color}`:''}">${exp.label}</td>
+        <td>${mvCell}</td>
         <td>
           <div class="row-actions">
             <button class="btn small ghost" onclick="BinCard.editItem('${it.id}')">Edit</button>
@@ -1468,7 +1632,7 @@
       </tr>`;
     }).join('');
     wrap.innerHTML = `<table>
-      <thead><tr><th>Item name</th><th>Purchase price (₵)</th><th>Sale price (₵)</th><th>Balance stock</th><th>Reorder level</th><th>Expiry date</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Item name</th><th>Purchase price (₵)</th><th>Sale price (₵)</th><th>Balance stock</th><th>Reorder level</th><th>Expiry date</th><th>Movement</th><th>Actions</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   }
@@ -1593,6 +1757,7 @@
     } else {
       txs.push({ id: uid(), date: txDate.value, itemId: it.id, type: currentType, quantity: qty, price, amount, profit, party, by: currentUser ? currentUser.name : '' });
     }
+    logActivity(txEditId.value ? 'Edited transaction' : 'Logged ' + currentType, it.name + ' × ' + fmt(qty) + ' @ ₵' + price + (party ? ' — ' + party : ''));
     saveTx();
     resetTxForm();
     renderTxTable();
@@ -1604,6 +1769,7 @@
   txCancelEdit.addEventListener('click', resetTxForm);
 
   function editTx(id){
+    if(!isAdminUser()) return;
     const t = txs.find(x => x.id === id);
     if(!t) return;
     txEditId.value = t.id;
@@ -1624,7 +1790,10 @@
   }
 
   function deleteTx(id){
+    if(!isAdminUser()) return;
     if(!confirm('Delete this transaction? This will also update the stock balance.')) return;
+    const goneTx = txs.find(t => t.id === id);
+    if(goneTx){ const gi = itemById(goneTx.itemId); logActivity('Deleted transaction', (gi ? gi.name : 'item') + ' × ' + fmt(goneTx.quantity) + ' (' + goneTx.type + ', ' + goneTx.date + ')'); }
     txs = txs.filter(t => t.id !== id);
     saveTx();
     renderTxTable();
@@ -1668,6 +1837,24 @@
   }
 
   // ================= STOCK ROLLUP =================
+  // Fast/slow moving: units issued (Stock Out) in the last MOVE_DAYS days. Among items with
+  // activity, the top half by units issued are Fast; the rest (incl. none issued) are Slow.
+  const MOVE_DAYS = 90;
+  function movementMap(){
+    const cutoff = new Date(Date.now() - MOVE_DAYS * 86400000).toISOString().slice(0,10);
+    const out = {}, seen = {};
+    for(const t of txs){
+      seen[t.itemId] = true;
+      if(t.type === 'Stock Out' && t.date >= cutoff) out[t.itemId] = (out[t.itemId] || 0) + t.quantity;
+    }
+    const ids = items.filter(it => seen[it.id]).map(it => it.id);
+    const moving = ids.filter(id => out[id] > 0).sort((a,b) => out[b] - out[a]);
+    const fast = new Set(moving.slice(0, Math.ceil(moving.length / 2)));
+    const res = {};
+    ids.forEach(id => { res[id] = { out: out[id] || 0, cls: fast.has(id) ? 'Fast' : 'Slow' }; });
+    return res;
+  }
+
   function stockFor(itemId){
     let stockIn = 0, stockOut = 0, txCount = 0, lastTx = null;
     for(const t of txs){
@@ -2262,6 +2449,7 @@
             stocked++;
           }
         }
+        logActivity('Imported items from CSV', added + ' added' + (stocked ? ', ' + stocked + ' with opening stock' : ''));
         saveItems(); saveTx();
         renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
         helper.style.color = 'var(--teal)';
@@ -2295,6 +2483,7 @@
         }
         items = data.items;
         txs = data.transactions;
+        logActivity('Restored full backup', items.length + ' items, ' + txs.length + ' transactions');
         saveItems(); saveTx();
         renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
         helper.textContent = 'Backup restored.';
@@ -2308,91 +2497,53 @@
     reader.readAsText(file);
   });
 
-  // ---------------- INITIAL PULL FROM SHARED DATABASE ----------------
-  // The app boots instantly from this device's local cache (above), then
-  // quietly refreshes with whatever is on the server so everyone stays in
-  // sync with what other staff have entered on other devices.
-  async function refreshFromDatabase(){
-    if(!db) return;
-    try{
-      const [itemsRes, txRes, usersRes, settingsRes] = await Promise.all([
-        db.from('items').select('*'),
-        db.from('transactions').select('*'),
-        db.from('app_users').select('*'),
-        db.from('app_settings').select('*')
-      ]);
-      if(itemsRes.error || txRes.error || usersRes.error || settingsRes.error){
-        dbWarn('initial load', itemsRes.error || txRes.error || usersRes.error || settingsRes.error);
-        return;
-      }
-
-      items = (itemsRes.data || []).map(r => ({
-        id: r.id, name: r.name, pppu: r.pppu, sppu: r.sppu,
-        expiry: r.expiry || '', reorderLevel: r.reorder_level
-      }));
-      txs = (txRes.data || []).map(r => ({
-        id: r.id, date: r.date, itemId: r.item_id, type: r.type,
-        quantity: r.quantity, price: r.price, amount: r.amount, profit: r.profit,
-        party: r.party || '', by: r.by || ''
-      }));
-      const prevCurrentId = currentUser ? currentUser.id : null;
-      users = (usersRes.data || []).map(r => ({
-        id: r.id, name: r.name, username: r.username, role: r.role || '',
-        isAdmin: !!r.is_admin, passHash: r.pass_hash, createdAt: r.created_at || ''
-      }));
-
-      localStorage.setItem(LS_ITEMS, JSON.stringify(items));
-      localStorage.setItem(LS_TX, JSON.stringify(txs));
-      localStorage.setItem(LS_USERS, JSON.stringify(users));
-
-      (settingsRes.data || []).forEach(row => {
-        if(row.key === LS_PASS_APP || row.key === LS_PASS_ITEMS) localStorage.setItem(row.key, row.value);
-      });
-      const settingKeys = new Set((settingsRes.data || []).map(r => r.key));
-      if(!settingKeys.has(LS_PASS_APP)) localStorage.removeItem(LS_PASS_APP);
-      if(!settingKeys.has(LS_PASS_ITEMS)) localStorage.removeItem(LS_PASS_ITEMS);
-
-      if(prevCurrentId){
-        currentUser = users.find(u => u.id === prevCurrentId) || null;
-        if(!currentUser){
-          localStorage.removeItem(LS_CURRENT_USER);
-          renderUserBadge();
-          setAuthTab(users.length ? 'login' : 'register');
-          showAuthScreen();
-        }
-      }
-
-      renderItemSelect(); renderItemTable(); renderTxTable(); renderStock(); renderDashboard();
-      renderAccountsList(); renderPassStatus(); renderUserBadge();
-      if(currentUser){ if(appPass.hasPass()) showAppLock(); else hideAppLock(); }
-    } catch(e){ dbWarn('initial load', e); }
-  }
-
   // expose for inline onclick handlers
-  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin };
+  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, toggleApproval, approveUser };
 
-  // ---------------- initial render ----------------
-  renderItemSelect();
-  renderItemTable();
-  renderTxTable();
-  renderStock();
-  renderDashboard();
-  renderPassStatus();
-  updateFooterDate();
-  setInterval(updateFooterDate, 60 * 1000);
-  resetTxForm();
-  if(currentUser) enforceInitialViewGate();
-  refreshFromDatabase();
+  // ---------------- initial load + render ----------------
+  const bootOverlay = document.createElement('div');
+  bootOverlay.textContent = 'Loading shared inventory data…';
+  bootOverlay.style.cssText = 'position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:var(--ink);color:var(--cream);font-family:"Oswald",sans-serif;letter-spacing:.05em;text-transform:uppercase;font-size:14px;';
+  document.body.appendChild(bootOverlay);
 
-  // seed a starter example the very first time, so the app isn't a blank void
-  if(!items.length && !txs.length && !localStorage.getItem('bincard_seeded_v1')){
-    items.push({ id: uid(), name: 'Sample Item — A4 Paper Ream', pppu: 3.50, sppu: 5.00 });
-    localStorage.setItem('bincard_seeded_v1', '1');
-    saveItems();
+  try {
+    await loadState();
+    bootAuth();
     renderItemSelect();
     renderItemTable();
+    renderTxTable();
     renderStock();
+    renderDashboard();
+    renderPassStatus();
+    resetTxForm();
+    if(currentUser){ enforceInitialViewGate(); notifyPending(); }
+  } catch(err){
+    console.error(err);
+    bootOverlay.textContent = "Couldn't reach the shared database. Check your connection and reload.";
+    bootOverlay.style.color = 'var(--rust)';
+    return;
   }
+  bootOverlay.remove();
+
+  updateFooterDate();
+  setInterval(updateFooterDate, 60 * 1000);
+
+  // Poll for changes made by other devices/users. If a save isn't pending
+  // locally, silently refresh from the shared database and re-render.
+  setInterval(async () => {
+    if(saveInFlight || saveQueued) return;
+    try {
+      const res = await apiFetch('/api/state');
+      if(res.status === 401){ accessDenied(); return; }
+      if(!res.ok) return;
+      const data = await res.json();
+      if(data.version !== stateVersion){
+        items = data.items || []; txs = data.transactions || []; users = data.users || []; activity = data.activity || [];
+        stateVersion = data.version || 0;
+        rerenderEverything();
+      }
+    } catch(err){ /* ignore transient network errors */ }
+  }, 20000);
 })();
 </script>
 </body>
