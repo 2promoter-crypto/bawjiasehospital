@@ -77,3 +77,19 @@ New accounts are created as "awaiting approval" and cannot log in until an
 admin approves them (Password tab → Accounts → Approve). The first account,
 and the owner username, are approved automatically. Admins can also revoke
 access later; the person is signed out the next time their screen syncs.
+
+## Forgotten password by email
+
+Passwords are stored only as hashes, so they can't be emailed back. Instead
+people get a one-time link (valid 30 minutes) to choose a new one.
+
+1. Create a free account at resend.com, create an API key, and (to email
+   anyone other than yourself) verify a sending domain there.
+2. In Vercel -> Settings -> Environment Variables add, for Production:
+   - `RESEND_API_KEY` — the key from Resend
+   - `MAIL_FROM` — e.g. `Bawjiase Inventory <noreply@yourdomain.com>`
+   - `APP_URL` (optional) — e.g. `https://bawjiasehospital.vercel.app`
+3. Redeploy.
+4. New accounts enter an email when registering. For existing accounts, an
+   admin opens Password tab -> Accounts -> Set email.
+5. On the login screen, "Forgot password?" sends the link.
