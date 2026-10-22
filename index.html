@@ -728,6 +728,24 @@
     </section>
 
     <section class="panel">
+      <h2>Procurement request</h2>
+      <p class="helper" style="margin-bottom:16px;">Works out what to order from past consumption: it adds up what was issued (Stock Out) over the chosen number of months, takes the monthly average, and requests enough to cover that many months of use, less the stock you already have. Items with no consumption or enough stock are left out.</p>
+      <div class="filter-row">
+        <div class="field">
+          <label for="procMonths">Months of consumption to use</label>
+          <select id="procMonths">
+            <option value="4">4 months</option>
+            <option value="5">5 months</option>
+            <option value="6" selected>6 months</option>
+          </select>
+        </div>
+        <button class="btn" id="exportProcBtn">Export procurement request (CSV)</button>
+        <button class="btn ghost" id="exportProcPdfBtn">Export procurement request (PDF)</button>
+      </div>
+      <div class="helper" id="procHelper" style="margin-top:10px;"></div>
+    </section>
+
+    <section class="panel">
       <h2>Full backup</h2>
       <p class="helper" style="margin-bottom:16px;">Everything in this app lives only in this browser. Download a backup now and then, and keep the file somewhere safe — you can load it back in on this device or any other.</p>
       <div class="filter-row">
@@ -2441,6 +2459,53 @@
     });
     if(!rows.length){ alert('No items are currently at or below their reorder level.'); return; }
     exportCsv('reorder-level.csv', ['Item Name','Balance Stock','Reorder Level','Stock Value (GHS)'], rows);
+  });
+
+  // ================= PROCUREMENT REQUEST =================
+  // Request qty = (average monthly issues over the last N months x N) - current balance, rounded up.
+  function procurementRows(months){
+    const d = new Date();
+    d.setMonth(d.getMonth() - months);
+    const start = d.toISOString().slice(0,10);
+    const out = [];
+    for(const it of items){
+      let issued = 0;
+      for(const t of txs){
+        if(t.itemId === it.id && t.type === 'Stock Out' && t.date >= start) issued += t.quantity;
+      }
+      if(issued <= 0) continue;
+      const avg = issued / months;
+      const balance = stockFor(it.id).balance;
+      const qty = Math.ceil(avg * months - balance);
+      if(qty <= 0) continue;
+      out.push({ it, issued, avg, balance, qty, cost: qty * it.pppu });
+    }
+    return out.sort((a,b) => a.it.name.localeCompare(b.it.name));
+  }
+  function procurementTable(months){
+    const list = procurementRows(months);
+    const total = list.reduce((n, r) => n + r.cost, 0);
+    return { list, total };
+  }
+  document.getElementById('exportProcBtn').addEventListener('click', () => {
+    const months = Number(document.getElementById('procMonths').value);
+    const { list, total } = procurementTable(months);
+    const helper = document.getElementById('procHelper');
+    if(!list.length){ helper.textContent = `Nothing to request: no item needs more stock based on the last ${months} months.`; return; }
+    helper.textContent = `${list.length} item(s) to request, estimated cost ${money(total)}.`;
+    const rows = list.map(r => [r.it.name, r.issued, Math.round(r.avg * 100) / 100, r.balance, r.qty, r.it.pppu, r.cost]);
+    rows.push(['TOTAL', '', '', '', '', '', total]);
+    exportCsv(`procurement-request-${months}-months.csv`, ['Item Name', `Issued (last ${months} months)`, 'Average Monthly Issue', 'Balance Stock', 'Quantity to Request', 'Unit Cost (GHS)', 'Estimated Cost (GHS)'], rows);
+  });
+  document.getElementById('exportProcPdfBtn').addEventListener('click', () => {
+    const months = Number(document.getElementById('procMonths').value);
+    const { list, total } = procurementTable(months);
+    const helper = document.getElementById('procHelper');
+    if(!list.length){ helper.textContent = `Nothing to request: no item needs more stock based on the last ${months} months.`; return; }
+    helper.textContent = `${list.length} item(s) to request, estimated cost ${money(total)}.`;
+    const rows = list.map(r => [r.it.name, fmt(r.issued), fmt(r.avg), fmt(r.balance), fmt(r.qty), moneyPdf(r.it.pppu), moneyPdf(r.cost)]);
+    rows.push(['TOTAL', '', '', '', '', '', moneyPdf(total)]);
+    exportPdf(`Procurement request (based on ${months} months of consumption)`, ['Item Name', `Issued (${months} mo)`, 'Avg / Month', 'Balance', 'Qty to Request', 'Unit Cost', 'Est. Cost'], rows, `procurement-request-${months}-months.pdf`, 'landscape');
   });
 
   // ================= PDF EXPORT =================
