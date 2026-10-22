@@ -413,6 +413,10 @@
         </select>
       </div>
       <div class="field">
+        <label for="regDob">Date of birth <span style="color:var(--muted);">(used to recover your password)</span></label>
+        <input type="date" id="regDob" required>
+      </div>
+      <div class="field">
         <label for="regPassword">Choose a password</label>
         <input type="password" id="regPassword" autocomplete="new-password" placeholder="At least 4 characters" required>
       </div>
@@ -422,6 +426,31 @@
       </div>
       <div class="modal-error" id="registerError"></div>
       <button type="submit" class="btn">Create account</button>
+    </form>
+
+    <form id="forgotForm" style="display:none;" autocomplete="off">
+      <p class="helper">Enter your username and date of birth to set a new password.</p>
+      <div class="field">
+        <label for="forgotUsername">Username</label>
+        <input type="text" id="forgotUsername" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="forgotDob">Date of birth</label>
+        <input type="date" id="forgotDob" required>
+      </div>
+      <div class="field">
+        <label for="forgotNew">New password</label>
+        <input type="password" id="forgotNew" autocomplete="new-password" placeholder="At least 4 characters" required>
+      </div>
+      <div class="field">
+        <label for="forgotConfirm">Confirm new password</label>
+        <input type="password" id="forgotConfirm" autocomplete="new-password" required>
+      </div>
+      <div class="modal-error" id="forgotError"></div>
+      <button type="submit" class="btn">Set new password</button>
+      <div style="text-align:center; margin-top:12px;">
+        <a href="#" id="forgotBackLink" style="font-size:12px; color:var(--muted);">Back to log in</a>
+      </div>
     </form>
   </div>
 </div>
@@ -468,6 +497,7 @@
 
   <!-- DASHBOARD -->
   <div class="view active" id="view-dashboard">
+    <div id="idleBanner" style="display:none; margin:0 0 16px; padding:12px 14px; border-radius:var(--radius); border:1px solid var(--amber); background:rgba(224,160,40,.12); color:var(--cream); font-size:13px; cursor:pointer;" role="alert"></div>
     <section class="panel">
       <h2>Ledger period</h2>
       <div class="filter-row">
@@ -494,6 +524,12 @@
     <section class="panel">
       <h2>Reorder alerts <span class="count" id="reorderCount"></span></h2>
       <div class="table-wrap" id="reorderAlertWrap"></div>
+    </section>
+
+    <section class="panel" id="idlePanel">
+      <h2>Not issued in 2 months <span class="count" id="idleCount"></span></h2>
+      <p class="helper" style="margin-bottom:12px;">Items that are in stock but have had no Stock Out (issue) in the past 2 months.</p>
+      <div class="table-wrap" id="idleAlertWrap"></div>
     </section>
 
     <section class="panel">
@@ -713,6 +749,7 @@
       <div id="accountsListWrap"></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
         <button class="btn ghost small" id="changeMyPasswordBtn">Change my password</button>
+        <button class="btn ghost small" id="setMyDobBtn">Set my date of birth</button>
         <button class="btn ghost small" id="addAccountBtn">Add another account</button>
       </div>
     </section>
@@ -1141,13 +1178,17 @@
   const LS_CURRENT_USER = "bincard_current_user_v1";
 
   let users = JSON.parse(localStorage.getItem(LS_USERS) || "[]");
+  // Set to false if the database was never given the dob_hash column (see supabase-schema.sql),
+  // so saving accounts keeps working either way.
+  let dobColumnOk = true;
   let currentUser = null;
 
   function saveUsers(){
     localStorage.setItem(LS_USERS, JSON.stringify(users));
     syncTable('app_users', users, u => ({
       id: u.id, name: u.name, username: u.username, role: u.role || null,
-      is_admin: !!u.isAdmin, approved: !!u.approved, pass_hash: u.passHash, created_at: u.createdAt || null
+      is_admin: !!u.isAdmin, approved: !!u.approved, pass_hash: u.passHash, created_at: u.createdAt || null,
+      ...(dobColumnOk ? { dob_hash: u.dobHash || null } : {})
     }));
   }
   function normalizeUsername(u){ return (u || '').trim().toLowerCase(); }
@@ -1193,6 +1234,7 @@
   const regName = document.getElementById('regName');
   const regUsername = document.getElementById('regUsername');
   const regRole = document.getElementById('regRole');
+  const regDob = document.getElementById('regDob');
   const regPassword = document.getElementById('regPassword');
   const regConfirm = document.getElementById('regConfirm');
   const registerError = document.getElementById('registerError');
@@ -1201,14 +1243,17 @@
   function hideAuthScreen(){ authScreen.style.display = 'none'; }
 
   function setAuthTab(tab){
+    const isForgot = tab === 'forgot';
     const isLogin = tab !== 'register';
     authTabLogin.classList.toggle('active', isLogin);
     authTabRegister.classList.toggle('active', !isLogin);
-    loginForm.style.display = isLogin ? 'block' : 'none';
+    loginForm.style.display = (isLogin && !isForgot) ? 'block' : 'none';
     registerForm.style.display = isLogin ? 'none' : 'block';
+    document.getElementById('forgotForm').style.display = isForgot ? 'block' : 'none';
     loginError.textContent = '';
     loginError.style.color = '';
     registerError.textContent = '';
+    document.getElementById('forgotError').textContent = '';
   }
   authTabLogin.addEventListener('click', () => setAuthTab('login'));
   authTabRegister.addEventListener('click', () => setAuthTab('register'));
@@ -1376,11 +1421,96 @@
   }
 
   document.getElementById('changeMyPasswordBtn').addEventListener('click', changeMyPassword);
+
+  // ---- date of birth (password recovery) ----
+  // Only a hash of the date is stored, never the date itself.
+  async function hashDob(username, dob){ return sha256Hex('dob:' + normalizeUsername(username) + ':' + dob); }
+
+  // Simple brake on guessing: 5 wrong tries per username, then a 15-minute wait.
+  const DOB_MAX_TRIES = 5, DOB_LOCK_MS = 15 * 60 * 1000;
+  function dobLockState(uname){
+    const all = JSON.parse(localStorage.getItem('bincard_dob_tries_v1') || '{}');
+    const e = all[uname] || { n: 0, until: 0 };
+    return { all, e };
+  }
+
   document.getElementById('forgotPasswordLink').addEventListener('click', e => {
     e.preventDefault();
-    loginError.style.color = '';
-    loginError.textContent = 'Ask an admin to reset your password (Password tab → Accounts → Reset password). Forgotten owner password: see the README.';
+    setAuthTab('forgot');
+    document.getElementById('forgotUsername').value = loginUsername.value;
+    document.getElementById('forgotUsername').focus();
   });
+  document.getElementById('forgotBackLink').addEventListener('click', e => { e.preventDefault(); setAuthTab('login'); });
+
+  document.getElementById('forgotForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const err = document.getElementById('forgotError');
+    err.style.color = '';
+    err.textContent = '';
+    const uname = normalizeUsername(document.getElementById('forgotUsername').value);
+    const dob = document.getElementById('forgotDob').value;
+    const pw = document.getElementById('forgotNew').value;
+    const conf = document.getElementById('forgotConfirm').value;
+    const { all, e: st } = dobLockState(uname);
+    if(st.until > Date.now()){
+      err.textContent = `Too many wrong tries. Try again in ${Math.ceil((st.until - Date.now())/60000)} minute(s), or ask an admin to reset your password.`;
+      return;
+    }
+    if(pw.length < 4){ err.textContent = 'New password must be at least 4 characters.'; return; }
+    if(pw !== conf){ err.textContent = "New password and confirmation don't match."; return; }
+    const user = findUserByUsername(uname);
+    if(user && !user.dobHash){
+      err.textContent = 'This account has no date of birth on file. Ask an admin to reset your password.';
+      return;
+    }
+    const ok = user && (await hashDob(uname, dob)) === user.dobHash;
+    if(!ok){
+      st.n = (st.n || 0) + 1;
+      if(st.n >= DOB_MAX_TRIES){ st.until = Date.now() + DOB_LOCK_MS; st.n = 0; }
+      all[uname] = st;
+      localStorage.setItem('bincard_dob_tries_v1', JSON.stringify(all));
+      err.textContent = 'Username and date of birth do not match.';
+      return;
+    }
+    delete all[uname];
+    localStorage.setItem('bincard_dob_tries_v1', JSON.stringify(all));
+    user.passHash = await sha256Hex(pw);
+    saveUsers();
+    ['forgotDob','forgotNew','forgotConfirm'].forEach(id => document.getElementById(id).value = '');
+    setAuthTab('login');
+    loginUsername.value = uname;
+    loginError.style.color = 'var(--teal)';
+    loginError.textContent = 'Password changed. Log in with your new password.';
+    loginPassword.focus();
+  });
+
+  // Let a logged-in user add / change the date of birth used for recovery.
+  function askDob(msg){
+    return new Promise(resolve => {
+      const ov = document.createElement('div');
+      ov.className = 'modal-overlay active';
+      ov.style.zIndex = '2500';
+      ov.innerHTML = `<form class="modal-box"><h3>Date of birth</h3><p class="d-msg"></p>
+        <div class="field"><input type="date" class="d-in" required></div>
+        <div class="modal-actions"><button type="button" class="btn ghost d-cancel">Not now</button><button type="submit" class="btn">Save</button></div></form>`;
+      ov.querySelector('.d-msg').textContent = msg;
+      document.body.appendChild(ov);
+      const inp = ov.querySelector('.d-in'); inp.focus();
+      ov.querySelector('.d-cancel').addEventListener('click', () => { ov.remove(); resolve(null); });
+      ov.querySelector('form').addEventListener('submit', ev => { ev.preventDefault(); const v = inp.value; ov.remove(); resolve(v); });
+    });
+  }
+  async function setMyDob(prompted){
+    if(!currentUser) return;
+    const dob = await askDob(prompted
+      ? 'Add your date of birth so you can reset your own password if you forget it. Only a scrambled version is stored.'
+      : 'Enter your date of birth. It is used to recover your password if you forget it.');
+    if(!dob) return;
+    currentUser.dobHash = await hashDob(currentUser.username, dob);
+    saveUsers();
+    if(!prompted) alert('Date of birth saved.');
+  }
+  document.getElementById('setMyDobBtn').addEventListener('click', () => setMyDob(false));
 
   function completeLogin(user){
     currentUser = user;
@@ -1390,6 +1520,7 @@
     renderAccountsList();
     if(appPass.hasPass()) showAppLock(); else hideAppLock();
     enforceInitialViewGate();
+    if(!user.dobHash && dobColumnOk) setTimeout(() => setMyDob(true), 400);
   }
 
   async function tryLogin(){
@@ -1418,6 +1549,8 @@
     const uname = normalizeUsername(regUsername.value);
     const pass = regPassword.value;
     const confirm = regConfirm.value;
+    const dob = regDob.value;
+    if(!dob){ registerError.textContent = 'Enter your date of birth (used to recover your password).'; return; }
     if(!name){ registerError.textContent = 'Enter your name.'; return; }
     if(!/^[a-z0-9._]{3,20}$/.test(uname)){ registerError.textContent = 'Username: 3-20 characters, letters, numbers, "." or "_" only.'; return; }
     if(findUserByUsername(uname)){ registerError.textContent = 'That username is already taken.'; return; }
@@ -1427,10 +1560,10 @@
     // are auto-approved (otherwise nobody could ever approve anyone).
     // Everyone else needs an existing admin to approve them first.
     const autoApprove = isSuperAdminUser({ username: uname }) || users.length === 0;
-    const user = { id: uid(), name, username: uname, role: regRole.value, isAdmin: false, approved: autoApprove, passHash: await sha256Hex(pass), createdAt: todayStr() };
+    const user = { id: uid(), name, username: uname, role: regRole.value, isAdmin: false, approved: autoApprove, passHash: await sha256Hex(pass), dobHash: await hashDob(uname, dob), createdAt: todayStr() };
     users.push(user);
     saveUsers();
-    regName.value = ''; regUsername.value = ''; regPassword.value = ''; regConfirm.value = '';
+    regName.value = ''; regUsername.value = ''; regPassword.value = ''; regConfirm.value = ''; regDob.value = '';
     if(autoApprove){
       completeLogin(user);
     } else {
@@ -2084,6 +2217,65 @@
     </table>`;
   }
 
+  // Items still in stock that have not been issued (Stock Out) for the past 2 months.
+  // Items first received less than 2 months ago are left out - they haven't had time yet.
+  const IDLE_MONTHS = 2;
+  function idleCutoffStr(){
+    const d = new Date();
+    d.setMonth(d.getMonth() - IDLE_MONTHS);
+    return d.toISOString().slice(0,10);
+  }
+  function idleItems(){
+    const cutoff = idleCutoffStr();
+    const out = [];
+    for(const it of items){
+      const s = stockFor(it.id);
+      if(s.balance <= 0) continue;                       // nothing in stock to issue
+      let lastOut = '', firstIn = '';
+      for(const t of txs){
+        if(t.itemId !== it.id) continue;
+        if(t.type === 'Stock Out'){ if(t.date > lastOut) lastOut = t.date; }
+        else if(!firstIn || t.date < firstIn){ firstIn = t.date; }
+      }
+      if(lastOut){
+        if(lastOut >= cutoff) continue;                  // issued recently
+      } else if(!firstIn || firstIn >= cutoff){
+        continue;                                        // never issued, but received too recently to judge
+      }
+      const ref = lastOut || firstIn;
+      const days = Math.max(0, Math.round((new Date(todayStr()) - new Date(ref)) / 86400000));
+      out.push({ it, s, lastOut, days });
+    }
+    return out.sort((a,b) => b.days - a.days);
+  }
+
+  function renderIdleAlerts(){
+    const wrap = document.getElementById('idleAlertWrap');
+    const countEl = document.getElementById('idleCount');
+    const banner = document.getElementById('idleBanner');
+    if(!wrap) return;
+    const rows = idleItems();
+    countEl.textContent = rows.length ? `(${rows.length})` : '';
+    if(!rows.length){
+      banner.style.display = 'none';
+      wrap.innerHTML = `<div class="empty">Every item in stock has been issued within the past ${IDLE_MONTHS} months.</div>`;
+      return;
+    }
+    banner.style.display = 'block';
+    banner.textContent = `⚠ ${rows.length} item${rows.length === 1 ? ' has' : 's have'} not been issued in the past ${IDLE_MONTHS} months. Tap to see which.`;
+    banner.onclick = () => document.getElementById('idlePanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const trs = rows.map(r => `<tr>
+      <td class="name">${escapeHtml(r.it.name)}</td>
+      <td class="mono">${fmt(r.s.balance)}</td>
+      <td class="mono">${r.lastOut ? escapeHtml(r.lastOut) : 'Never issued'}</td>
+      <td class="mono" style="color:var(--amber)">${r.days} days</td>
+    </tr>`).join('');
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Item name</th><th>Balance stock</th><th>Last issued</th><th>Idle for</th></tr></thead>
+      <tbody>${trs}</tbody>
+    </table>`;
+  }
+
   function renderDashboard(){
     const from = fromDate.value || '0000-01-01';
     const to = toDate.value || '9999-12-31';
@@ -2107,6 +2299,7 @@
     document.getElementById('statValue').textContent = money(totalValue);
 
     renderReorderAlerts();
+    renderIdleAlerts();
 
     const wrap = document.getElementById('recentTableWrap');
     const recent = [...txs].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 8);
@@ -2548,8 +2741,10 @@
       const prevCurrentId = currentUser ? currentUser.id : null;
       users = (usersRes.data || []).map(r => ({
         id: r.id, name: r.name, username: r.username, role: r.role || '',
-        isAdmin: !!r.is_admin, approved: !!r.approved, passHash: r.pass_hash, createdAt: r.created_at || ''
+        isAdmin: !!r.is_admin, approved: !!r.approved, passHash: r.pass_hash, createdAt: r.created_at || '',
+        dobHash: r.dob_hash || ''
       }));
+      if((usersRes.data || []).length && !('dob_hash' in usersRes.data[0])) dobColumnOk = false;
 
       localStorage.setItem(LS_ITEMS, JSON.stringify(items));
       localStorage.setItem(LS_TX, JSON.stringify(txs));

@@ -38,6 +38,11 @@ create table if not exists app_users (
 -- column without touching your existing accounts (they stay approved).
 alter table app_users add column if not exists approved boolean not null default true;
 
+-- Date-of-birth password recovery: stores only a scrambled (hashed) date.
+-- Safe to re-run. Without this column, the "Forgot password?" recovery
+-- cannot save dates of birth.
+alter table app_users add column if not exists dob_hash text;
+
 create table if not exists app_settings (
   key text primary key,
   value text not null
