@@ -52,7 +52,7 @@ vercel --prod # subsequent production deploys
   - To change the code later, edit it in the schema file and run only the `create or replace function app_access_ok()` statement again. Every device will then ask for the new code.
   - If you already ran an older version of `supabase-schema.sql`, re-run this one once — it replaces the old open policies (safe to re-run).
   - Use a long code: the check can be tried repeatedly, so a short one could be guessed.
-- **Resetting a forgotten password:** an admin opens **Password → Accounts** and clicks **Reset password** next to the person's name, then types (or generates) a new password and gives it to them. Only the owner can reset another admin. Anyone can change their own password with **Change my password** on the same page.
+- **Resetting a forgotten password:** an admin opens **Password → Accounts** and clicks **Reset password** next to the person's name, then types (or generates) a new password and gives it to them. Any admin can reset any other account, including the owner's. Anyone can change their own password with **Change my password** on the same page.
   - If the **owner** forgets their password, run this in Supabase's SQL Editor (replace `NewPassword123`):
     ```sql
     update app_users

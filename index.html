@@ -1248,9 +1248,9 @@
           ? `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Remove admin</button>`
           : `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Make admin</button>`;
       }
-      // Admins can reset regular accounts; only the owner can reset other admins.
-      // The owner account can only change its own password (button below the list).
-      const canReset = iAmAdmin && !superAdmin && (iAmSuperAdmin || !admin);
+      // Any admin can reset any other account, including the owner's.
+      // (Your own password is changed with the "Change my password" button.)
+      const canReset = iAmAdmin && !(currentUser && currentUser.id === u.id);
       const resetBtn = canReset ? `<button type="button" class="btn ghost small" onclick="BinCard.resetPassword('${u.id}')">Reset password</button>` : '';
       const approveBtn = (!approved && iAmAdmin) ? `<button type="button" class="btn small" onclick="BinCard.approveAccount('${u.id}')">Approve</button>` : '';
       const removeBtn = (users.length > 1 && !superAdmin) ? `<button type="button" class="btn small danger" onclick="BinCard.deleteAccount('${u.id}')">Remove</button>` : '';
@@ -1349,8 +1349,7 @@
     const u = users.find(x => x.id === id);
     if(!u) return;
     if(!isAdminUser()){ alert('Only an admin can reset passwords.'); return; }
-    if(isSuperAdminUser(u)){ alert("The owner account's password can only be changed by the owner (Change my password)."); return; }
-    if(isAdminUser(u) && !isSuperAdminUser()){ alert('Only the owner can reset another admin\'s password.'); return; }
+    if(currentUser && currentUser.id === u.id){ alert('Use "Change my password" to change your own password.'); return; }
     const pw = await askNewPassword({
       title: 'Reset password',
       message: `Set a new password for ${u.name} (@${u.username}). Give it to them, and ask them to change it from the Password tab after logging in.`,
