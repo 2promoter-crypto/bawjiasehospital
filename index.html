@@ -383,6 +383,9 @@
       </div>
       <div class="modal-error" id="loginError"></div>
       <button type="submit" class="btn">Log in</button>
+      <div style="text-align:center; margin-top:12px;">
+        <a href="#" id="forgotPasswordLink" style="font-size:12px; color:var(--muted);">Forgot password?</a>
+      </div>
     </form>
 
     <form id="registerForm" style="display:none;">
@@ -708,7 +711,10 @@
       <h2>Accounts</h2>
       <p class="helper" style="margin-bottom:16px;">Everyone using this device logs in with their own name and password. Frederick Addae-Mintah (Procurement Manager) is the owner account: only he can view the account list, remove an account, or grant/remove admin rights for other accounts.</p>
       <div id="accountsListWrap"></div>
-      <button class="btn ghost small" id="addAccountBtn" style="margin-top:14px;">Add another account</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+        <button class="btn ghost small" id="changeMyPasswordBtn">Change my password</button>
+        <button class="btn ghost small" id="addAccountBtn">Add another account</button>
+      </div>
     </section>
 
     <div class="helper" id="passAdminOnlyNotice" style="display:none; margin:0 0 16px;">Only admin accounts (Frederick Addae-Mintah, and anyone he's granted admin rights to) can view or change the app passwords.</div>
@@ -1242,6 +1248,10 @@
           ? `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Remove admin</button>`
           : `<button type="button" class="btn ghost small" onclick="BinCard.toggleAdmin('${u.id}')">Make admin</button>`;
       }
+      // Admins can reset regular accounts; only the owner can reset other admins.
+      // The owner account can only change its own password (button below the list).
+      const canReset = iAmAdmin && !superAdmin && (iAmSuperAdmin || !admin);
+      const resetBtn = canReset ? `<button type="button" class="btn ghost small" onclick="BinCard.resetPassword('${u.id}')">Reset password</button>` : '';
       const approveBtn = (!approved && iAmAdmin) ? `<button type="button" class="btn small" onclick="BinCard.approveAccount('${u.id}')">Approve</button>` : '';
       const removeBtn = (users.length > 1 && !superAdmin) ? `<button type="button" class="btn small danger" onclick="BinCard.deleteAccount('${u.id}')">Remove</button>` : '';
       return `
@@ -1250,7 +1260,7 @@
           <div class="name">${escapeHtml(u.name)}${currentUser && currentUser.id === u.id ? ' <span class="helper" style="display:inline;margin:0;">(you)</span>' : ''}</div>
           <div class="helper" style="margin:2px 0 0;">@${escapeHtml(u.username)}${u.role ? ' · ' + escapeHtml(u.role) : ''}${adminBadge}${pendingBadge}</div>
         </div>
-        <div style="display:flex; gap:8px;">${approveBtn}${adminBtn}${removeBtn}</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">${approveBtn}${resetBtn}${adminBtn}${removeBtn}</div>
       </div>
     `;
     }).join('');
@@ -1274,6 +1284,104 @@
     saveUsers();
     renderAccountsList();
   }
+
+  // ---- password dialog (used by "Reset password" and "Change my password") ----
+  // Resolves with the new password, or null if cancelled.
+  function askNewPassword({ title, message, currentHash, allowGenerate }){
+    return new Promise(resolve => {
+      const ov = document.createElement('div');
+      ov.className = 'modal-overlay active';
+      ov.style.zIndex = '2500';
+      ov.innerHTML = `
+        <form class="modal-box" autocomplete="off">
+          <h3></h3>
+          <p class="pw-msg"></p>
+          ${currentHash ? '<div class="field"><label>Current password</label><input type="password" class="pw-cur" autocomplete="current-password"></div>' : ''}
+          <div class="field"><label>New password</label><input type="password" class="pw-new" autocomplete="new-password"></div>
+          <div class="field"><label>Confirm new password</label><input type="password" class="pw-conf" autocomplete="new-password"></div>
+          ${allowGenerate ? '<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);margin-top:8px;"><input type="checkbox" class="pw-show"> Show password</label><button type="button" class="btn ghost small pw-gen" style="margin-top:8px;">Generate a password</button>' : ''}
+          <div class="modal-error pw-err"></div>
+          <div class="modal-actions">
+            <button type="button" class="btn ghost pw-cancel">Cancel</button>
+            <button type="submit" class="btn">Save</button>
+          </div>
+        </form>`;
+      ov.querySelector('h3').textContent = title;
+      ov.querySelector('.pw-msg').textContent = message || '';
+      document.body.appendChild(ov);
+      const q = sel => ov.querySelector(sel);
+      const done = v => { ov.remove(); resolve(v); };
+      const first = q('.pw-cur') || q('.pw-new');
+      setTimeout(() => first.focus(), 50);
+      q('.pw-cancel').addEventListener('click', () => done(null));
+      ov.addEventListener('mousedown', e => { if(e.target === ov) done(null); });
+      if(allowGenerate){
+        q('.pw-show').addEventListener('change', e => {
+          q('.pw-new').type = q('.pw-conf').type = e.target.checked ? 'text' : 'password';
+        });
+        q('.pw-gen').addEventListener('click', () => {
+          // avoids look-alike characters (0/O, 1/l/I)
+          const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+          const arr = new Uint32Array(8);
+          crypto.getRandomValues(arr);
+          const pw = Array.from(arr).map(n => chars[n % chars.length]).join('');
+          q('.pw-new').value = q('.pw-conf').value = pw;
+          q('.pw-show').checked = true;
+          q('.pw-new').type = q('.pw-conf').type = 'text';
+          q('.pw-err').textContent = '';
+        });
+      }
+      q('form').addEventListener('submit', async e => {
+        e.preventDefault();
+        const err = q('.pw-err');
+        if(currentHash){
+          if(await sha256Hex(q('.pw-cur').value) !== currentHash){ err.textContent = 'Current password is incorrect.'; return; }
+        }
+        const pw = q('.pw-new').value;
+        if(pw.length < 4){ err.textContent = 'New password must be at least 4 characters.'; return; }
+        if(pw !== q('.pw-conf').value){ err.textContent = "New password and confirmation don't match."; return; }
+        done(pw);
+      });
+    });
+  }
+
+  async function resetPassword(id){
+    const u = users.find(x => x.id === id);
+    if(!u) return;
+    if(!isAdminUser()){ alert('Only an admin can reset passwords.'); return; }
+    if(isSuperAdminUser(u)){ alert("The owner account's password can only be changed by the owner (Change my password)."); return; }
+    if(isAdminUser(u) && !isSuperAdminUser()){ alert('Only the owner can reset another admin\'s password.'); return; }
+    const pw = await askNewPassword({
+      title: 'Reset password',
+      message: `Set a new password for ${u.name} (@${u.username}). Give it to them, and ask them to change it from the Password tab after logging in.`,
+      allowGenerate: true
+    });
+    if(pw === null) return;
+    u.passHash = await sha256Hex(pw);
+    saveUsers();
+    renderAccountsList();
+    alert(`Password for ${u.name} has been reset.`);
+  }
+
+  async function changeMyPassword(){
+    if(!currentUser){ return; }
+    const pw = await askNewPassword({
+      title: 'Change my password',
+      message: 'Enter your current password, then choose a new one.',
+      currentHash: currentUser.passHash
+    });
+    if(pw === null) return;
+    currentUser.passHash = await sha256Hex(pw);
+    saveUsers();
+    alert('Your password has been changed.');
+  }
+
+  document.getElementById('changeMyPasswordBtn').addEventListener('click', changeMyPassword);
+  document.getElementById('forgotPasswordLink').addEventListener('click', e => {
+    e.preventDefault();
+    loginError.style.color = '';
+    loginError.textContent = 'Ask an admin to reset your password (Password tab → Accounts → Reset password). Forgotten owner password: see the README.';
+  });
 
   function completeLogin(user){
     currentUser = user;
@@ -2484,7 +2592,7 @@
   // (live sync is started by startLiveSync() once the access code is accepted)
 
   // expose for inline onclick handlers
-  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, approveAccount };
+  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, approveAccount, resetPassword };
 
   // ---------------- initial render ----------------
   renderItemSelect();

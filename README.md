@@ -52,6 +52,13 @@ vercel --prod # subsequent production deploys
   - To change the code later, edit it in the schema file and run only the `create or replace function app_access_ok()` statement again. Every device will then ask for the new code.
   - If you already ran an older version of `supabase-schema.sql`, re-run this one once — it replaces the old open policies (safe to re-run).
   - Use a long code: the check can be tried repeatedly, so a short one could be guessed.
+- **Resetting a forgotten password:** an admin opens **Password → Accounts** and clicks **Reset password** next to the person's name, then types (or generates) a new password and gives it to them. Only the owner can reset another admin. Anyone can change their own password with **Change my password** on the same page.
+  - If the **owner** forgets their password, run this in Supabase's SQL Editor (replace `NewPassword123`):
+    ```sql
+    update app_users
+    set pass_hash = encode(extensions.digest('NewPassword123', 'sha256'), 'hex')
+    where username = 'addae_mintah';
+    ```
 - **Live sync:** when someone saves a change, other open devices are nudged within about a second and re-read the data; a refresh also runs every 30 seconds as a safety net.
 - New accounts now need an admin to approve them (Accounts panel) before they can log in — except the named super admin and the very first account created on a fresh database, so there's always someone able to approve others.
 - The Supabase **anon public** key is meant to be visible in client-side code — it is not a secret. Access is controlled by the row-level-security policies (which require the access code) in `supabase-schema.sql`, not by hiding the key. Never put your **service_role** key in this file.
