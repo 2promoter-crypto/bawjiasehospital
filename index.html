@@ -283,11 +283,13 @@
   /* ---------- auth (accounts) screen ---------- */
   #authScreen{
     position:fixed; inset:0; background:var(--ink); z-index:400;
-    display:flex; align-items:center; justify-content:center; padding:20px;
+    display:flex; padding:20px 20px calc(40px + env(safe-area-inset-bottom, 0px));
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
   }
   .auth-box{
     background:var(--ink-2); border:1px solid var(--ink-3); border-radius:6px;
     padding:34px 30px; width:100%; max-width:380px; box-shadow:var(--shadow);
+    margin:auto;   /* centred when it fits, scrolls from the top when it doesn't */
   }
   .auth-box .mark{
     width:56px;height:56px;border-radius:50%; background:var(--rust); margin:0 auto 16px;
