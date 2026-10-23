@@ -609,6 +609,13 @@
             <option value="recent">Most recently active</option>
           </select>
         </div>
+        <div class="field">
+          <label for="stockLayout">Layout</label>
+          <select id="stockLayout">
+            <option value="details" selected>Details (table)</option>
+            <option value="cards">Cards</option>
+          </select>
+        </div>
         <div class="field" style="min-width:auto;">
           <label style="display:flex; align-items:center; gap:8px; flex-direction:row; text-transform:none; letter-spacing:0; font-family:'IBM Plex Sans',sans-serif; font-size:12px; color:var(--muted); font-weight:400;">
             <input type="checkbox" id="stockLowOnly" style="width:auto;"> Low stock &amp; below reorder only
@@ -801,8 +808,8 @@
     </section>
 
     <section class="panel">
-      <h2>Items &amp; Export password</h2>
-      <p class="helper" style="margin-bottom:16px;">Separately locks just the <strong>Items</strong> and <strong>Export</strong> tabs — asked for every time either is opened. It can be the same as the app password or different.</p>
+      <h2>Transactions, Items &amp; Export password</h2>
+      <p class="helper" style="margin-bottom:16px;">Separately locks the <strong>Transactions</strong>, <strong>Items</strong> and <strong>Export</strong> tabs — asked for every time one of them is opened. It can be the same as the app password or different.</p>
       <div class="helper" id="passStatusItems" style="margin-bottom:16px;"></div>
       <form class="entry" id="passFormItems">
         <div class="field full" id="currentPassFieldItems" style="display:none;">
@@ -1043,7 +1050,7 @@
   // ---------------- PASSWORD LOCK ----------------
   const LS_PASS_APP = "bincard_pass_app_hash_v1";
   const LS_PASS_ITEMS = "bincard_pass_items_hash_v1";
-  const PROTECTED_VIEWS = ['items', 'export'];
+  const PROTECTED_VIEWS = ['transactions', 'items', 'export'];
 
   async function sha256Hex(str){
     if(window.crypto && window.crypto.subtle){
@@ -1150,8 +1157,8 @@
     currentFieldId: 'currentPassFieldItems', currentInputId: 'passCurrentItems',
     newInputId: 'passNewItems', confirmInputId: 'passConfirmItems',
     saveBtnId: 'passSaveBtnItems', removeBtnId: 'passRemoveBtnItems', helperId: 'passHelperItems',
-    onText: 'A password is currently set — Items and Export will ask for it.',
-    offText: 'No password is set yet — Items and Export are open to anyone using this browser.'
+    onText: 'A password is currently set — Transactions, Items and Export will ask for it.',
+    offText: 'No password is set yet — Transactions, Items and Export are open to anyone using this browser.'
   });
 
   function renderPassStatus(){
@@ -1276,8 +1283,22 @@
   authTabLogin.addEventListener('click', () => setAuthTab('login'));
   authTabRegister.addEventListener('click', () => setAuthTab('register'));
 
+  // Only admins may open Transactions, Items and Export.
+  const ADMIN_ONLY_VIEWS = ['transactions', 'items', 'export'];
+  function applyRoleAccess(){
+    const admin = isAdminUser();
+    document.querySelectorAll('nav button').forEach(b => {
+      if(ADMIN_ONLY_VIEWS.includes(b.dataset.view)) b.style.display = admin ? '' : 'none';
+    });
+    if(!admin){
+      const active = document.querySelector('.view.active');
+      if(active && ADMIN_ONLY_VIEWS.includes(active.id.replace('view-', ''))) switchToView('dashboard');
+    }
+  }
+
   function renderUserBadge(){
     const badge = document.getElementById('currentUserBadge');
+    applyRoleAccess();
     if(!currentUser){ badge.style.display = 'none'; return; }
     badge.style.display = 'flex';
     document.getElementById('currentUserAvatar').textContent = initials(currentUser.name);
@@ -1285,6 +1306,7 @@
   }
 
   function renderAccountsList(){
+    applyRoleAccess();
     const wrap = document.getElementById('accountsListWrap');
     if(!wrap) return;
     if(!isAdminUser()){
@@ -1693,6 +1715,7 @@
   const navButtons = document.querySelectorAll('nav button');
 
   function switchToView(view){
+    if(ADMIN_ONLY_VIEWS.includes(view) && !isAdminUser()) view = 'dashboard';
     navButtons.forEach(b => b.classList.toggle('active', b.dataset.view === view));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + view).classList.add('active');
@@ -1726,6 +1749,7 @@
   document.getElementById('stockSearch').addEventListener('input', renderStock);
   document.getElementById('stockSort').addEventListener('change', renderStock);
   document.getElementById('stockLowOnly').addEventListener('change', renderStock);
+  document.getElementById('stockLayout').addEventListener('change', renderStock);
 
   // ================= ITEMS =================
   const itemForm = document.getElementById('itemForm');
@@ -2042,6 +2066,69 @@
     return { stockIn, stockOut, balance, value, saleValue, txCount, lastTx };
   }
 
+  // ---- detailed bin card (ledger) for one item ----
+  function ledgerFor(itemId){
+    const list = txs.map((t, i) => ({ t, i })).filter(x => x.t.itemId === itemId)
+      .sort((a, b) => a.t.date.localeCompare(b.t.date) || a.i - b.i);
+    let bal = 0;
+    return list.map(({ t }) => {
+      const received = t.type === 'Stock In' ? t.quantity : 0;
+      const issued = t.type === 'Stock In' ? 0 : t.quantity;
+      bal += received - issued;
+      return { date: t.date, type: t.type, party: t.party || '', received, issued, balance: bal, by: t.by || '' };
+    });
+  }
+
+  function openBinCard(itemId){
+    const it = itemById(itemId);
+    if(!it) return;
+    const s = stockFor(it.id);
+    const rows = ledgerFor(it.id);
+    const exp = expiryInfo(it.expiry);
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay active';
+    ov.style.zIndex = '2400';
+    const body = rows.length ? `<div class="table-wrap" style="max-height:48vh; overflow:auto;"><table>
+        <thead><tr><th>Date</th><th>Type</th><th>Supplier / Department</th><th>Received</th><th>Issued</th><th>Balance</th><th>Recorded by</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td class="mono">${escapeHtml(r.date)}</td>
+          <td>${escapeHtml(r.type)}</td>
+          <td>${escapeHtml(r.party) || '—'}</td>
+          <td class="mono">${r.received ? fmt(r.received) : ''}</td>
+          <td class="mono">${r.issued ? fmt(r.issued) : ''}</td>
+          <td class="mono" style="${r.balance < 0 ? 'color:var(--rust)' : ''}">${fmt(r.balance)}</td>
+          <td>${escapeHtml(r.by) || '—'}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="empty">No transactions recorded for this item yet.</div>';
+    ov.innerHTML = `<div class="modal-box" style="width:min(920px,94vw); max-width:94vw; max-height:92vh; overflow:auto;">
+      <h3>Bin card</h3>
+      <div class="helper" style="margin-bottom:12px; line-height:1.7;">
+        <strong style="font-size:15px;">${escapeHtml(it.name)}</strong><br>
+        Balance on hand: <strong>${fmt(s.balance)}</strong> &nbsp;|&nbsp; Total received: ${fmt(s.stockIn)} &nbsp;|&nbsp; Total issued: ${fmt(s.stockOut)}<br>
+        Purchase price: ${money(it.pppu)} &nbsp;|&nbsp; Sale price: ${money(it.sppu)} &nbsp;|&nbsp; Stock value: ${money(s.value)}<br>
+        Reorder level: ${(it.reorderLevel === null || it.reorderLevel === undefined) ? '—' : fmt(it.reorderLevel)} &nbsp;|&nbsp; Expiry: ${exp.label}
+      </div>
+      ${body}
+      <div class="modal-actions" style="margin-top:14px;">
+        <button type="button" class="btn ghost bc-csv">Export CSV</button>
+        <button type="button" class="btn ghost bc-pdf">Export PDF</button>
+        <button type="button" class="btn bc-close">Close</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelector('.bc-close').addEventListener('click', close);
+    ov.addEventListener('mousedown', e => { if(e.target === ov) close(); });
+    const safe = it.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    ov.querySelector('.bc-csv').addEventListener('click', () => {
+      exportCsv(`bin-card-${safe}.csv`, ['Date','Type','Supplier / Department','Received','Issued','Balance','Recorded by'],
+        rows.map(r => [r.date, r.type, r.party, r.received || '', r.issued || '', r.balance, r.by]));
+    });
+    ov.querySelector('.bc-pdf').addEventListener('click', () => {
+      exportPdf(`Bin card: ${it.name} (balance ${fmt(s.balance)})`, ['Date','Type','Supplier / Department','Received','Issued','Balance','Recorded by'],
+        rows.map(r => [r.date, r.type, r.party, r.received ? fmt(r.received) : '', r.issued ? fmt(r.issued) : '', fmt(r.balance), r.by]),
+        `bin-card-${safe}.pdf`, 'landscape');
+    });
+  }
+
   function renderStock(){
     const grid = document.getElementById('binGrid');
     const summaryEl = document.getElementById('stockSummary');
@@ -2086,6 +2173,29 @@
       return;
     }
 
+    if(document.getElementById('stockLayout').value === 'details'){
+      const trs = rows.map(({it, s, low}) => {
+        const exp = expiryInfo(it.expiry);
+        return `<tr>
+          <td class="name">${escapeHtml(it.name)}</td>
+          <td>${money(it.pppu)}</td>
+          <td>${money(it.sppu)}</td>
+          <td class="mono">${fmt(s.stockIn)}</td>
+          <td class="mono">${fmt(s.stockOut)}</td>
+          <td class="mono" style="font-weight:600; ${s.balance<0||low?'color:var(--rust)':''}">${fmt(s.balance)}${low ? ' ⚠' : ''}</td>
+          <td>${money(s.value)}</td>
+          <td class="mono">${(it.reorderLevel === null || it.reorderLevel === undefined) ? '—' : fmt(it.reorderLevel)}</td>
+          <td class="mono" style="${exp.color?`color:${exp.color}`:''}">${exp.label}</td>
+          <td class="mono">${s.lastTx ? escapeHtml(s.lastTx.date) : '—'}</td>
+          <td><button type="button" class="btn ghost small" onclick="BinCard.openBinCard('${it.id}')">Bin card</button></td>
+        </tr>`;
+      }).join('');
+      grid.innerHTML = `<div class="table-wrap" style="grid-column:1/-1;"><table>
+        <thead><tr><th>Item name</th><th>Purchase price</th><th>Sale price</th><th>Total received</th><th>Total issued</th><th>Balance on hand</th><th>Stock value</th><th>Reorder level</th><th>Expiry</th><th>Last activity</th><th></th></tr></thead>
+        <tbody>${trs}</tbody></table></div>`;
+      return;
+    }
+
     grid.innerHTML = rows.map(({it, s, low}) => {
       const exp = expiryInfo(it.expiry);
       const reorderLine = (it.reorderLevel === null || it.reorderLevel === undefined)
@@ -2104,6 +2214,7 @@
         </div>
         ${reorderLine}
         ${expiryLine}
+        <button type="button" class="btn ghost small" style="margin-top:10px;" onclick="BinCard.openBinCard('${it.id}')">View details</button>
       </div>`;
     }).join('');
   }
@@ -2851,7 +2962,7 @@
   // (live sync is started by startLiveSync() once the access code is accepted)
 
   // expose for inline onclick handlers
-  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, approveAccount, resetPassword };
+  window.BinCard = { editItem, deleteItem, editTx, deleteTx, deleteAccount, toggleAdmin, approveAccount, resetPassword, openBinCard };
 
   // ---------------- initial render ----------------
   renderItemSelect();
